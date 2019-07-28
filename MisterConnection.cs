@@ -20,12 +20,33 @@ namespace Marius.Mister
         {
         }
 
+        private delegate bool MisterWorkAction(ref MisterWorkItem workItem, long sequence);
+
         private struct MisterWorkItem
         {
             public TKey Key;
             public TValue Value;
             public object State;
-            public Action<TKey, TValue, object, long> Action;
+            public bool WaitPending;
+            public MisterWorkAction Action;
+        }
+
+        private struct MisterCheckpointItem
+        {
+            public AutoResetEvent ResetEvent;
+            public TaskCompletionSource<MisterVoid> TaskCompletionSource;
+
+            public MisterCheckpointItem(AutoResetEvent resetEvent)
+            {
+                ResetEvent = resetEvent;
+                TaskCompletionSource = null;
+            }
+
+            public MisterCheckpointItem(TaskCompletionSource<MisterVoid> taskCompletionSource)
+            {
+                TaskCompletionSource = taskCompletionSource;
+                ResetEvent = null;
+            }
         }
 
         private readonly DirectoryInfo _directory;
@@ -42,7 +63,7 @@ namespace Marius.Mister
         private BlockingCollection<MisterWorkItem> _workQueue;
         private Thread[] _workerThreads;
 
-        private BlockingCollection<AutoResetEvent> _checkpointQueue;
+        private BlockingCollection<MisterCheckpointItem> _checkpointQueue;
         private Thread _checkpointThread;
 
         private int _checkpointVersion;
@@ -78,9 +99,10 @@ namespace Marius.Mister
             if (_isClosed)
                 return;
 
-            Checkpoint();
-
             _isClosed = true;
+
+            PerformCheckpoint();
+
             _cancellationTokenSource.Cancel();
 
             for (var i = 0; i < _workerThreads.Length; i++)
@@ -98,12 +120,18 @@ namespace Marius.Mister
             if (_isClosed)
                 throw new ObjectDisposedException("MisterConnection");
 
-            var handle = new AutoResetEvent(false);
-            _checkpointQueue.Add(handle);
-            handle.WaitOne();
+            PerformCheckpoint();
         }
 
-        public Task<TValue> Get(TKey key)
+        public Task CheckpointAsync()
+        {
+            if (_isClosed)
+                throw new ObjectDisposedException("MisterConnection");
+
+            return PerformCheckpointAsync();
+        }
+
+        public Task<TValue> GetAsync(TKey key)
         {
             if (_isClosed)
                 throw new ObjectDisposedException("MisterConnection");
@@ -118,7 +146,7 @@ namespace Marius.Mister
             return tsc.Task;
         }
 
-        public Task Set(TKey key, TValue value)
+        public Task SetAsync(TKey key, TValue value)
         {
             if (_isClosed)
                 throw new ObjectDisposedException("MisterConnection");
@@ -134,7 +162,24 @@ namespace Marius.Mister
             return tsc.Task;
         }
 
-        public Task Delete(TKey key)
+        public Task SetAsync(TKey key, TValue value, bool waitPending)
+        {
+            if (_isClosed)
+                throw new ObjectDisposedException("MisterConnection");
+
+            var tsc = new TaskCompletionSource<MisterVoid>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _workQueue.Add(new MisterWorkItem()
+            {
+                Key = key,
+                Value = value,
+                State = tsc,
+                WaitPending = waitPending,
+                Action = PerformSet,
+            });
+            return tsc.Task;
+        }
+
+        public Task DeleteAsync(TKey key)
         {
             if (_isClosed)
                 throw new ObjectDisposedException("MisterConnection");
@@ -149,13 +194,32 @@ namespace Marius.Mister
             return tsc.Task;
         }
 
-        private unsafe void PerformGet(TKey key, TValue value, object state, long sequence)
+        public Task DeleteAsync(TKey key, bool waitPending)
         {
+            if (_isClosed)
+                throw new ObjectDisposedException("MisterConnection");
+
+            var tsc = new TaskCompletionSource<MisterVoid>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _workQueue.Add(new MisterWorkItem()
+            {
+                Key = key,
+                State = tsc,
+                WaitPending = waitPending,
+                Action = PerformDelete,
+            });
+            return tsc.Task;
+        }
+
+        private unsafe bool PerformGet(ref MisterWorkItem workItem, long sequence)
+        {
+            var status = default(Status);
+            var key = workItem.Key;
+            var state = workItem.State;
+
             try
             {
                 var input = default(byte[]);
                 var output = default(TValue);
-                var status = default(Status);
                 using (var keyStream = _streamManager.GetStream())
                 {
                     keyStream.Position = 4;
@@ -179,27 +243,36 @@ namespace Marius.Mister
                     }
                 }
 
-                if (state == null)
-                    return;
-
-                var tsc = Unsafe.As<TaskCompletionSource<TValue>>(state);
-                if (status == Status.ERROR)
-                    tsc.SetException(new Exception());
-                else
-                    tsc.SetResult(output);
+                if (state != null)
+                {
+                    var tsc = Unsafe.As<TaskCompletionSource<TValue>>(state);
+                    if (status == Status.ERROR)
+                        tsc.SetException(new Exception());
+                    else
+                        tsc.SetResult(output);
+                }
             }
             catch (Exception ex)
             {
-                var tsc = (TaskCompletionSource<TValue>)state;
-                tsc.SetException(ex);
+                if (state != null)
+                {
+                    var tsc = (TaskCompletionSource<TValue>)state;
+                    tsc.SetException(ex);
+                }
             }
+
+            return status != Status.PENDING;
         }
 
-        private unsafe void PerformSet(TKey key, TValue value, object state, long sequence)
+        private unsafe bool PerformSet(ref MisterWorkItem workItem, long sequence)
         {
+            var status = default(Status);
+            var key = workItem.Key;
+            var value = workItem.Value;
+            var state = workItem.State;
+
             try
             {
-                var status = default(Status);
                 using (var keyStream = _streamManager.GetStream())
                 using (var valueStream = _streamManager.GetStream())
                 {
@@ -226,36 +299,44 @@ namespace Marius.Mister
                         do
                         {
                             status = _faster.Upsert(ref misterKey, ref misterValue, Empty.Default, sequence);
-                            if (status == Status.PENDING)
+                            if (workItem.WaitPending && status == Status.PENDING)
                                 _faster.CompletePending(true);
-                        } while (status == Status.PENDING);
+                        } while (workItem.WaitPending && status == Status.PENDING);
 
                         Interlocked.Increment(ref _checkpointVersion);
                     }
                 }
 
 
-                if (state == null)
-                    return;
-
-                var tsc = Unsafe.As<TaskCompletionSource<MisterVoid>>(state);
-                if (status == Status.ERROR)
-                    tsc.SetException(new Exception());
-                else
-                    tsc.SetResult(default(MisterVoid));
+                if (state != null)
+                {
+                    var tsc = Unsafe.As<TaskCompletionSource<MisterVoid>>(state);
+                    if (status == Status.ERROR)
+                        tsc.SetException(new Exception());
+                    else
+                        tsc.SetResult(default(MisterVoid));
+                }
             }
             catch (Exception ex)
             {
-                var tsc = (TaskCompletionSource<MisterVoid>)state;
-                tsc.SetException(ex);
+                if (state != null)
+                {
+                    var tsc = (TaskCompletionSource<MisterVoid>)state;
+                    tsc.SetException(ex);
+                }
             }
+
+            return status != Status.PENDING;
         }
 
-        private unsafe void PerformDelete(TKey key, TValue value, object state, long sequence)
+        private unsafe bool PerformDelete(ref MisterWorkItem workItem, long sequence)
         {
+            var status = default(Status);
+            var key = workItem.Key;
+            var state = workItem.State;
+
             try
             {
-                var status = default(Status);
                 using (var keyStream = _streamManager.GetStream())
                 {
                     keyStream.Position = 4;
@@ -271,35 +352,84 @@ namespace Marius.Mister
                         do
                         {
                             status = _faster.Delete(ref misterKey, Empty.Default, sequence);
-                            if (status == Status.PENDING)
+                            if (workItem.WaitPending && status == Status.PENDING)
                                 _faster.CompletePending(true);
-                        } while (status == Status.PENDING);
+                        } while (workItem.WaitPending && status == Status.PENDING);
 
                         Interlocked.Increment(ref _checkpointVersion);
                     }
                 }
 
-                if (state == null)
-                    return;
-
-                var tsc = Unsafe.As<TaskCompletionSource<MisterVoid>>(state);
-                if (status == Status.ERROR)
-                    tsc.SetException(new Exception());
-                else
-                    tsc.SetResult(default(MisterVoid));
+                if (state != null)
+                {
+                    var tsc = Unsafe.As<TaskCompletionSource<MisterVoid>>(state);
+                    if (status == Status.ERROR)
+                        tsc.SetException(new Exception());
+                    else
+                        tsc.SetResult(default(MisterVoid));
+                }
             }
             catch (Exception ex)
             {
-                if (state == null)
-                    return;
-
-                var tsc = (TaskCompletionSource<MisterVoid>)state;
-                tsc.SetException(ex);
+                if (state != null)
+                {
+                    var tsc = (TaskCompletionSource<MisterVoid>)state;
+                    tsc.SetException(ex);
+                }
             }
+
+            return status != Status.PENDING;
+        }
+
+        private void PerformCheckpoint()
+        {
+            var handle = new AutoResetEvent(false);
+            _checkpointQueue.Add(new MisterCheckpointItem(handle));
+            handle.WaitOne();
+        }
+
+        private Task PerformCheckpointAsync()
+        {
+            var tsc = new TaskCompletionSource<MisterVoid>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _checkpointQueue.Add(new MisterCheckpointItem(tsc));
+            return tsc.Task;
         }
 
         private void Initialize()
         {
+            var checkpointTokenFile = new FileInfo(Path.Combine(_directory.FullName, "checkpoint_token.txt"));
+            var checkpointTokenBackupFile = new FileInfo(Path.Combine(_directory.FullName, "checkpoint_token_backup.txt"));
+
+            CleanOldCheckpoints(checkpointTokenFile, checkpointTokenBackupFile);
+
+            if (!TryRecover(checkpointTokenFile))
+            {
+                if (!TryRecover(checkpointTokenBackupFile))
+                    Create();
+            }
+
+            _workQueue = new BlockingCollection<MisterWorkItem>();
+            _workerThreads = new Thread[_settings.WorkerThreadCount];
+            for (var i = 0; i < _workerThreads.Length; i++)
+                _workerThreads[i] = new Thread(WorkerLoop) { IsBackground = true };
+
+            _checkpointQueue = new BlockingCollection<MisterCheckpointItem>();
+            _checkpointThread = new Thread(CheckpointLoop) { IsBackground = true };
+
+            for (var i = 0; i < _workerThreads.Length; i++)
+                _workerThreads[i].Start(i.ToString());
+
+            _checkpointThread.Start();
+        }
+
+        private void Create()
+        {
+            if (_faster != null)
+                _faster.Dispose();
+
+            if (_mainLog != null)
+                _mainLog.Close();
+
             var variableLengthStructSettings = new VariableLengthStructSettings<MisterObject, MisterObject>()
             {
                 keyLength = new MisterObjectVariableLengthStruct(),
@@ -311,32 +441,11 @@ namespace Marius.Mister
                 1L << 20,
                 new MisterObjectEnvironment<TValue>(_valueSerializer),
                 new LogSettings { LogDevice = _mainLog, },
-                new CheckpointSettings() { CheckpointDir = _directory.FullName, CheckPointType = CheckpointType.Snapshot },
+                new CheckpointSettings() { CheckpointDir = _directory.FullName, CheckPointType = CheckpointType.FoldOver },
                 serializerSettings: null,
                 comparer: new MisterObjectEqualityComparer(),
                 variableLengthStructSettings: variableLengthStructSettings
             );
-
-            var checkpointTokenFile = new FileInfo(Path.Combine(_directory.FullName, "checkpoint_token.txt"));
-            var checkpointTokenBackupFile = new FileInfo(Path.Combine(_directory.FullName, "checkpoint_token_backup.txt"));
-
-            CleanOldCheckpoints(checkpointTokenFile, checkpointTokenBackupFile);
-
-            if (!TryRecover(checkpointTokenFile))
-                TryRecover(checkpointTokenBackupFile);
-
-            _workQueue = new BlockingCollection<MisterWorkItem>();
-            _workerThreads = new Thread[_settings.WorkerThreadCount];
-            for (var i = 0; i < _workerThreads.Length; i++)
-                _workerThreads[i] = new Thread(WorkerLoop) { IsBackground = true };
-
-            _checkpointQueue = new BlockingCollection<AutoResetEvent>();
-            _checkpointThread = new Thread(CheckpointLoop) { IsBackground = true };
-
-            for (var i = 0; i < _workerThreads.Length; i++)
-                _workerThreads[i].Start(i.ToString());
-
-            _checkpointThread.Start();
         }
 
         private bool TryRecover(FileInfo checkpointTokenFile)
@@ -354,9 +463,14 @@ namespace Marius.Mister
                     }
 
                     if (checkpointToken != null)
+                    {
+                        Create();
                         _faster.Recover(checkpointToken.Value);
+                    }
                     else
+                    {
                         checkpointTokenFile.Delete();
+                    }
 
                     return checkpointToken != null;
                 }
@@ -434,19 +548,35 @@ namespace Marius.Mister
                 var workerRefreshIntervalMilliseconds = _settings.WorkerRefreshIntervalMilliseconds;
                 var sequence = 0L;
                 var session = _faster.StartSession();
+                var hasPending = false;
 
                 while (!_cancellationTokenSource.IsCancellationRequested)
                 {
                     if (_workQueue.TryTake(out var item, workerRefreshIntervalMilliseconds))
                     {
-                        item.Action(item.Key, item.Value, item.State, sequence);
-                        sequence++;
+                        if (!item.Action(ref item, sequence))
+                            hasPending = true;
 
+                        sequence++;
                         if ((sequence & 0x7F) == 0)
+                        {
+                            if (hasPending)
+                            {
+                                _faster.CompletePending(true);
+                                hasPending = false;
+                            }
+
                             _faster.Refresh();
+                        }
                     }
                     else
                     {
+                        if (hasPending)
+                        {
+                            _faster.CompletePending(true);
+                            hasPending = false;
+                        }
+
                         _faster.Refresh();
                     }
                 }
@@ -493,10 +623,10 @@ namespace Marius.Mister
 
                 while (!_cancellationTokenSource.IsCancellationRequested)
                 {
-                    var waitHandle = default(AutoResetEvent);
+                    var checkpointItem = default(MisterCheckpointItem);
                     try
                     {
-                        _checkpointQueue.TryTake(out waitHandle, checkpointIntervalMilliseconds, _cancellationTokenSource.Token);
+                        _checkpointQueue.TryTake(out checkpointItem, checkpointIntervalMilliseconds, _cancellationTokenSource.Token);
                     }
                     catch (OperationCanceledException) { }
 
@@ -519,8 +649,6 @@ namespace Marius.Mister
                     if (newCheckpoint != currentCheckpointVersion)
                     {
                         currentCheckpointVersion = newCheckpoint;
-
-                        Trace.WriteLine("Checkpoint...");
 
                         _faster.StartSession();
                         _faster.TakeFullCheckpoint(out var token);
@@ -554,7 +682,6 @@ namespace Marius.Mister
                             takenCount = 2;
                         }
 
-                        Trace.WriteLine("...complete");
                         try
                         {
                             if (!checkpointTokenFile.Exists)
@@ -592,8 +719,11 @@ namespace Marius.Mister
                             _spinLock.Exit();
                     }
 
-                    if (waitHandle != null)
-                        waitHandle.Set();
+                    if (checkpointItem.ResetEvent != null)
+                        checkpointItem.ResetEvent.Set();
+
+                    if (checkpointItem.TaskCompletionSource != null)
+                        checkpointItem.TaskCompletionSource.SetResult(default(MisterVoid));
                 }
             }
             catch (Exception ex)

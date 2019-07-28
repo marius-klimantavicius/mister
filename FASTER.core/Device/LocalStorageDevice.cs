@@ -18,7 +18,8 @@ namespace FASTER.core
     {
         private readonly bool preallocateFile;
         private readonly bool deleteOnClose;
-        private readonly ConcurrentDictionary<int, SafeFileHandle> logHandles;
+        private readonly bool disableFileBuffering;
+        private readonly SafeConcurrentDictionary<int, SafeFileHandle> logHandles;
 
         /// <summary>
         /// Constructor
@@ -26,13 +27,15 @@ namespace FASTER.core
         /// <param name="filename"></param>
         /// <param name="preallocateFile"></param>
         /// <param name="deleteOnClose"></param>
-        public LocalStorageDevice(string filename, bool preallocateFile = false, bool deleteOnClose = false)
+        /// <param name="disableFileBuffering"></param>
+        public LocalStorageDevice(string filename, bool preallocateFile = false, bool deleteOnClose = false, bool disableFileBuffering = true)
             : base(filename, GetSectorSize(filename))
         {
             Native32.EnableProcessPrivileges();
             this.preallocateFile = preallocateFile;
             this.deleteOnClose = deleteOnClose;
-            logHandles = new ConcurrentDictionary<int, SafeFileHandle>();
+            this.disableFileBuffering = disableFileBuffering;
+            logHandles = new SafeConcurrentDictionary<int, SafeFileHandle>();
         }
 
         /// <summary>
@@ -72,11 +75,6 @@ namespace FASTER.core
                     Overlapped.Free(ovNative);
                     throw new Exception("Error reading from log file: " + error);
                 }
-            }
-            else
-            {
-                // On synchronous completion, issue callback directly
-                callback(0, bytesRead, ovNative);
             }
         }
 
@@ -119,11 +117,6 @@ namespace FASTER.core
                     throw new Exception("Error writing to log file: " + error);
                 }
             }
-            else
-            {
-                // On synchronous completion, issue callback directly
-                callback(0, bytesWritten, ovNative);
-            }
         }
 
 
@@ -153,10 +146,25 @@ namespace FASTER.core
                 logHandle.Dispose();
         }
 
-
-        private string GetSegmentName(int segmentId)
+        /// <summary>
+        ///
+        /// </summary>
+        /// <param name="segmentId"></param>
+        /// <returns></returns>
+        protected string GetSegmentName(int segmentId)
         {
             return FileName + "." + segmentId;
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="_segmentId"></param>
+        /// <returns></returns>
+        // Can be used to pre-load handles, e.g., after a checkpoint
+        protected SafeFileHandle GetOrAddHandle(int _segmentId)
+        {
+            return logHandles.GetOrAdd(_segmentId, segmentId => CreateHandle(segmentId));
         }
 
         private static uint GetSectorSize(string filename)
@@ -180,15 +188,31 @@ namespace FASTER.core
             uint fileCreation = unchecked((uint)FileMode.OpenOrCreate);
             uint fileFlags = Native32.FILE_FLAG_OVERLAPPED;
 
-            fileFlags = fileFlags | Native32.FILE_FLAG_NO_BUFFERING;
+            if (this.disableFileBuffering)
+            {
+                fileFlags = fileFlags | Native32.FILE_FLAG_NO_BUFFERING;
+            }
+
             if (deleteOnClose)
+            {
                 fileFlags = fileFlags | Native32.FILE_FLAG_DELETE_ON_CLOSE;
+
+                // FILE_SHARE_DELETE allows multiple FASTER instances to share a single log directory and each can specify deleteOnClose.
+                // This will allow the files to persist until all handles across all instances have been closed.
+                fileShare = fileShare | Native32.FILE_SHARE_DELETE;
+            }
 
             var logHandle = Native32.CreateFileW(
                 GetSegmentName(segmentId),
                 fileAccess, fileShare,
                 IntPtr.Zero, fileCreation,
                 fileFlags, IntPtr.Zero);
+
+            if (logHandle.IsInvalid)
+            {
+                var error = Marshal.GetLastWin32Error();
+                throw new IOException($"Error creating log file for {GetSegmentName(segmentId)}, error: {error}", Native32.MakeHRFromErrorCode(error));
+            }
 
             if (preallocateFile)
                 SetFileSize(FileName, logHandle, segmentSize);
@@ -202,11 +226,6 @@ namespace FASTER.core
                 throw new Exception("Error binding log handle for " + GetSegmentName(segmentId) + ": " + e.ToString());
             }
             return logHandle;
-        }
-
-        private SafeFileHandle GetOrAddHandle(int _segmentId)
-        {
-            return logHandles.GetOrAdd(_segmentId, segmentId => CreateHandle(segmentId));
         }
 
         /// Sets file size to the specified value.

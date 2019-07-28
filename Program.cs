@@ -28,11 +28,11 @@ namespace Marius.Mister
 
                 if (parts[0] == "set" && parts.Length > 2)
                 {
-                    connection.Set(parts[1], parts[2]).GetAwaiter().GetResult();
+                    connection.SetAsync(parts[1], parts[2]).GetAwaiter().GetResult();
                 }
                 else if (parts[0] == "get" && parts.Length > 1)
                 {
-                    var value = connection.Get(parts[1]).GetAwaiter().GetResult();
+                    var value = connection.GetAsync(parts[1]).GetAwaiter().GetResult();
                     Console.WriteLine(value);
                 }
                 else if (parts[0] == "setall")
@@ -45,7 +45,7 @@ namespace Marius.Mister
                     var tasks = new Task[4000000];
                     for (var i = 0; i < tasks.Length; i++)
                     {
-                        tasks[i] = connection.Set($"{prefix}{i}", $"{prefix}{i}");
+                        tasks[i] = connection.SetAsync($"{prefix}{i}", $"{prefix}{i}");
                     }
 
                     Task.WaitAll(tasks);

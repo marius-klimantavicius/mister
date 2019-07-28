@@ -14,8 +14,14 @@ namespace Marius.Mister
 
         public long Deserialize(Stream stream)
         {
+            if (stream.Length == 0)
+                return 0L;
+
             if (_threadBuffer == null)
                 _threadBuffer = new byte[8];
+
+            fixed (byte* ptr = _threadBuffer)
+                *(long*)ptr = 0L;
 
             var read = 0;
             var offset = 0;
