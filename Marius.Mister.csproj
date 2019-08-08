@@ -39,6 +39,9 @@
       <HintPath>packages\log4net.2.0.8\lib\net45-full\log4net.dll</HintPath>
     </Reference>
     <Reference Include="System" />
+    <Reference Include="System.Buffers, Version=4.0.3.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
+      <HintPath>packages\System.Buffers.4.5.0\lib\netstandard2.0\System.Buffers.dll</HintPath>
+    </Reference>
     <Reference Include="System.Core" />
     <Reference Include="System.Runtime.CompilerServices.Unsafe, Version=4.0.4.1, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
       <HintPath>packages\System.Runtime.CompilerServices.Unsafe.4.5.2\lib\netstandard2.0\System.Runtime.CompilerServices.Unsafe.dll</HintPath>
@@ -103,17 +106,24 @@
     <Compile Include="FASTER.core\Utilities\StateTransitions.cs" />
     <Compile Include="FASTER.core\Utilities\Status.cs" />
     <Compile Include="FASTER.core\Utilities\Utility.cs" />
+    <Compile Include="IMisterObjectSource.cs" />
+    <Compile Include="IMisterStreamSerializer.cs" />
     <Compile Include="IMisterSerializer.cs" />
     <Compile Include="Microsoft.IO\Events.cs" />
     <Compile Include="Microsoft.IO\RecyclableMemoryStream.cs" />
     <Compile Include="Microsoft.IO\RecyclableMemoryStreamManager.cs" />
+    <Compile Include="MisterPoolBufferObjectSource.cs" />
     <Compile Include="MisterConnection.cs" />
     <Compile Include="MisterConnectionSettings.cs" />
     <Compile Include="MisterLongSerializer.cs" />
+    <Compile Include="MisterStreamLongSerializer.cs" />
     <Compile Include="MisterObject.cs" />
     <Compile Include="MisterObjectEnvironment.cs" />
     <Compile Include="MisterObjectEqualityComparer.cs" />
     <Compile Include="MisterObjectVariableLengthStruct.cs" />
+    <Compile Include="MisterStreamObjectSource.cs" />
+    <Compile Include="MisterStreamSerializer.cs" />
+    <Compile Include="MisterStreamStringSerializer.cs" />
     <Compile Include="MisterStringSerializer.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

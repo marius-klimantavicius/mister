@@ -19,7 +19,7 @@ namespace Marius.Mister
             CheckpointIntervalMilliseconds = 10 * 60 * 1000;
             CheckpointCleanCount = 16;
 
-            WorkerThreadCount = 4;
+            WorkerThreadCount = Environment.ProcessorCount;
             WorkerRefreshIntervalMilliseconds = 1000;
         }
     }
