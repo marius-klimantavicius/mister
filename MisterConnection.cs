@@ -14,34 +14,34 @@ namespace Marius.Mister
 {
     public static class MisterConnection
     {
-        public static MisterConnection<TKey, TValue, TKeyObjectSource, TValueObjectSource> Create<TKey, TValue, TKeyObjectSource, TValueObjectSource>(DirectoryInfo directory, IMisterSerializer<TKey, TKeyObjectSource> keySerializer, IMisterSerializer<TValue, TValueObjectSource> valueSerializer, MisterConnectionSettings settings = null)
+        public static MisterConnection<TKey, TValue, TKeyObjectSource, TValueObjectSource> Create<TKey, TValue, TKeyObjectSource, TValueObjectSource>(DirectoryInfo directory, IMisterSerializer<TKey, TKeyObjectSource> keySerializer, IMisterSerializer<TValue, TValueObjectSource> valueSerializer, MisterConnectionSettings settings = null, string name = null)
             where TKeyObjectSource : struct, IMisterObjectSource
             where TValueObjectSource : struct, IMisterObjectSource
         {
-            return new MisterConnection<TKey, TValue, TKeyObjectSource, TValueObjectSource>(directory, keySerializer, valueSerializer, settings);
+            return new MisterConnection<TKey, TValue, TKeyObjectSource, TValueObjectSource>(directory, keySerializer, valueSerializer, settings, name);
         }
 
-        public static MisterConnection<TKey, TValue, MisterStreamObjectSource, TValueObjectSource> Create<TKey, TValue, TValueObjectSource>(DirectoryInfo directory, IMisterStreamSerializer<TKey> keyStreamSerializer, IMisterSerializer<TValue, TValueObjectSource> valueSerializer, MisterConnectionSettings settings = null)
+        public static MisterConnection<TKey, TValue, MisterStreamObjectSource, TValueObjectSource> Create<TKey, TValue, TValueObjectSource>(DirectoryInfo directory, IMisterStreamSerializer<TKey> keyStreamSerializer, IMisterSerializer<TValue, TValueObjectSource> valueSerializer, MisterConnectionSettings settings = null, string name = null, RecyclableMemoryStreamManager streamManager = null)
             where TValueObjectSource : struct, IMisterObjectSource
         {
-            var streamManager = new RecyclableMemoryStreamManager(1024, 4 * 1024, 1024 * 1024);
+            streamManager = streamManager ?? new RecyclableMemoryStreamManager(1024, 4 * 1024, 1024 * 1024);
             var keySerializer = new MisterStreamSerializer<TKey>(keyStreamSerializer, streamManager);
 
-            return new MisterConnection<TKey, TValue, MisterStreamObjectSource, TValueObjectSource>(directory, keySerializer, valueSerializer, settings);
+            return new MisterConnection<TKey, TValue, MisterStreamObjectSource, TValueObjectSource>(directory, keySerializer, valueSerializer, settings, name);
         }
 
-        public static MisterConnection<TKey, TValue, TKeyObjectSource, MisterStreamObjectSource> Create<TKey, TValue, TKeyObjectSource>(DirectoryInfo directory, IMisterSerializer<TKey, TKeyObjectSource> keySerializer, IMisterStreamSerializer<TValue> valueStreamSerializer, MisterConnectionSettings settings = null)
+        public static MisterConnection<TKey, TValue, TKeyObjectSource, MisterStreamObjectSource> Create<TKey, TValue, TKeyObjectSource>(DirectoryInfo directory, IMisterSerializer<TKey, TKeyObjectSource> keySerializer, IMisterStreamSerializer<TValue> valueStreamSerializer, MisterConnectionSettings settings = null, string name = null, RecyclableMemoryStreamManager streamManager = null)
             where TKeyObjectSource : struct, IMisterObjectSource
         {
-            var streamManager = new RecyclableMemoryStreamManager(1024, 4 * 1024, 1024 * 1024);
+            streamManager = streamManager ?? new RecyclableMemoryStreamManager(1024, 4 * 1024, 1024 * 1024);
             var valueSerializer = new MisterStreamSerializer<TValue>(valueStreamSerializer, streamManager);
 
-            return new MisterConnection<TKey, TValue, TKeyObjectSource, MisterStreamObjectSource>(directory, keySerializer, valueSerializer, settings);
+            return new MisterConnection<TKey, TValue, TKeyObjectSource, MisterStreamObjectSource>(directory, keySerializer, valueSerializer, settings, name);
         }
 
-        public static MisterConnection<TKey, TValue> Create<TKey, TValue>(DirectoryInfo directory, IMisterStreamSerializer<TKey> keySerializer, IMisterStreamSerializer<TValue> valueSerializer, MisterConnectionSettings settings = null)
+        public static MisterConnection<TKey, TValue> Create<TKey, TValue>(DirectoryInfo directory, IMisterStreamSerializer<TKey> keySerializer, IMisterStreamSerializer<TValue> valueSerializer, MisterConnectionSettings settings = null, string name = null, RecyclableMemoryStreamManager streamManager = null)
         {
-            return new MisterConnection<TKey, TValue>(directory, keySerializer, valueSerializer, settings);
+            return new MisterConnection<TKey, TValue>(directory, keySerializer, valueSerializer, settings, name, streamManager);
         }
     }
 
@@ -50,12 +50,12 @@ namespace Marius.Mister
         private readonly MisterConnection<TKey, TValue, MisterStreamObjectSource, MisterStreamObjectSource> _underlyingConnection;
         private readonly RecyclableMemoryStreamManager _streamManager;
 
-        public MisterConnection(DirectoryInfo directory, IMisterStreamSerializer<TKey> keySerializer, IMisterStreamSerializer<TValue> valueSerializer, MisterConnectionSettings settings = null)
-            : this(directory, keySerializer, valueSerializer, settings, null)
+        public MisterConnection(DirectoryInfo directory, IMisterStreamSerializer<TKey> keySerializer, IMisterStreamSerializer<TValue> valueSerializer, MisterConnectionSettings settings = null, string name = null)
+            : this(directory, keySerializer, valueSerializer, settings, name, null)
         {
         }
 
-        public MisterConnection(DirectoryInfo directory, IMisterStreamSerializer<TKey> keySerializer, IMisterStreamSerializer<TValue> valueSerializer, MisterConnectionSettings settings = null, RecyclableMemoryStreamManager streamManager = null)
+        public MisterConnection(DirectoryInfo directory, IMisterStreamSerializer<TKey> keySerializer, IMisterStreamSerializer<TValue> valueSerializer, MisterConnectionSettings settings = null, string name = null, RecyclableMemoryStreamManager streamManager = null)
         {
             if (directory == null)
                 throw new ArgumentNullException(nameof(directory));
@@ -71,7 +71,7 @@ namespace Marius.Mister
             var streamKeySerializer = new MisterStreamSerializer<TKey>(keySerializer, _streamManager);
             var streamValueSerializer = new MisterStreamSerializer<TValue>(valueSerializer, _streamManager);
 
-            _underlyingConnection = new MisterConnection<TKey, TValue, MisterStreamObjectSource, MisterStreamObjectSource>(directory, streamKeySerializer, streamValueSerializer, settings);
+            _underlyingConnection = new MisterConnection<TKey, TValue, MisterStreamObjectSource, MisterStreamObjectSource>(directory, streamKeySerializer, streamValueSerializer, settings, name);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -119,7 +119,7 @@ namespace Marius.Mister
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public Task DeleteAsync(TKey key, bool waitPending)
         {
-            return _underlyingConnection.DeleteAsync(key);
+            return _underlyingConnection.DeleteAsync(key, waitPending);
         }
     }
 
