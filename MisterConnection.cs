@@ -167,7 +167,6 @@ namespace Marius.Mister
         private readonly IMisterSerializer<TValue, TValueObjectSource> _valueSerializer;
         private readonly MisterConnectionSettings _settings;
         private readonly string _name;
-        private readonly RecyclableMemoryStreamManager _streamManager;
         private readonly CancellationTokenSource _cancellationTokenSource;
 
         private FasterKV<MisterObject, MisterObject, byte[], TValue, Empty, MisterObjectEnvironment<TValue, TValueObjectSource>> _faster;
@@ -201,7 +200,6 @@ namespace Marius.Mister
             _valueSerializer = valueSerializer;
             _settings = settings ?? new MisterConnectionSettings();
             _name = name;
-            _streamManager = new RecyclableMemoryStreamManager(1024, 4 * 1024, 1024 * 1024);
             _cancellationTokenSource = new CancellationTokenSource();
 
             Initialize();
