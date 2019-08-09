@@ -65,6 +65,7 @@
     <Compile Include="FASTER.core\Allocator\IFasterScanIterator.cs" />
     <Compile Include="FASTER.core\Allocator\MallocFixedPageSize.cs" />
     <Compile Include="FASTER.core\Allocator\VarLenBlittableAllocator.cs" />
+    <Compile Include="FASTER.core\Allocator\VarLenBlittableScanIterator.cs" />
     <Compile Include="FASTER.core\Device\Devices.cs" />
     <Compile Include="FASTER.core\Device\IDevice.cs" />
     <Compile Include="FASTER.core\Device\LocalStorageDevice.cs" />

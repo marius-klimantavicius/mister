@@ -71,6 +71,18 @@ namespace FASTER.core
             }
         }
 
+        private long _currentPhysicalAddress;
+
+        public ref Key GetKey()
+        {
+            return ref hlog.GetKey(_currentPhysicalAddress);
+        }
+
+        public ref Value GetValue()
+        {
+            return ref hlog.GetValue(_currentPhysicalAddress);
+        }
+
         /// <summary>
         /// Get next record in iterator
         /// </summary>
@@ -129,6 +141,7 @@ namespace FASTER.core
                         continue;
                     }
 
+                    _currentPhysicalAddress = _physicalAddress;
                     recordInfo = hlog.GetInfo(_physicalAddress);
                     key = hlog.GetKey(_physicalAddress);
                     value = hlog.GetValue(_physicalAddress);
@@ -144,6 +157,7 @@ namespace FASTER.core
                     continue;
                 }
 
+                _currentPhysicalAddress = physicalAddress;
                 recordInfo = hlog.GetInfo(physicalAddress);
                 key = hlog.GetKey(physicalAddress);
                 value = hlog.GetValue(physicalAddress);

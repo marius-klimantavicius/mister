@@ -33,6 +33,9 @@ namespace FASTER.core
     /// <typeparam name="Value"></typeparam>
     public interface IFasterScanIterator<Key, Value> : IDisposable
     {
+        ref Key GetKey();
+        ref Value GetValue();
+
         /// <summary>
         /// Get next record
         /// </summary>
