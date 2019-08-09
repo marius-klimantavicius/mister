@@ -12,7 +12,120 @@ using Microsoft.IO;
 
 namespace Marius.Mister
 {
+    public static class MisterConnection
+    {
+        public static MisterConnection<TKey, TValue, TKeyObjectSource, TValueObjectSource> Create<TKey, TValue, TKeyObjectSource, TValueObjectSource>(DirectoryInfo directory, IMisterSerializer<TKey, TKeyObjectSource> keySerializer, IMisterSerializer<TValue, TValueObjectSource> valueSerializer, MisterConnectionSettings settings = null)
+            where TKeyObjectSource : struct, IMisterObjectSource
+            where TValueObjectSource : struct, IMisterObjectSource
+        {
+            return new MisterConnection<TKey, TValue, TKeyObjectSource, TValueObjectSource>(directory, keySerializer, valueSerializer, settings);
+        }
+
+        public static MisterConnection<TKey, TValue, MisterStreamObjectSource, TValueObjectSource> Create<TKey, TValue, TValueObjectSource>(DirectoryInfo directory, IMisterStreamSerializer<TKey> keyStreamSerializer, IMisterSerializer<TValue, TValueObjectSource> valueSerializer, MisterConnectionSettings settings = null)
+            where TValueObjectSource : struct, IMisterObjectSource
+        {
+            var streamManager = new RecyclableMemoryStreamManager(1024, 4 * 1024, 1024 * 1024);
+            var keySerializer = new MisterStreamSerializer<TKey>(keyStreamSerializer, streamManager);
+
+            return new MisterConnection<TKey, TValue, MisterStreamObjectSource, TValueObjectSource>(directory, keySerializer, valueSerializer, settings);
+        }
+
+        public static MisterConnection<TKey, TValue, TKeyObjectSource, MisterStreamObjectSource> Create<TKey, TValue, TKeyObjectSource>(DirectoryInfo directory, IMisterSerializer<TKey, TKeyObjectSource> keySerializer, IMisterStreamSerializer<TValue> valueStreamSerializer, MisterConnectionSettings settings = null)
+            where TKeyObjectSource : struct, IMisterObjectSource
+        {
+            var streamManager = new RecyclableMemoryStreamManager(1024, 4 * 1024, 1024 * 1024);
+            var valueSerializer = new MisterStreamSerializer<TValue>(valueStreamSerializer, streamManager);
+
+            return new MisterConnection<TKey, TValue, TKeyObjectSource, MisterStreamObjectSource>(directory, keySerializer, valueSerializer, settings);
+        }
+
+        public static MisterConnection<TKey, TValue> Create<TKey, TValue>(DirectoryInfo directory, IMisterStreamSerializer<TKey> keySerializer, IMisterStreamSerializer<TValue> valueSerializer, MisterConnectionSettings settings = null)
+        {
+            return new MisterConnection<TKey, TValue>(directory, keySerializer, valueSerializer, settings);
+        }
+    }
+
     public sealed class MisterConnection<TKey, TValue>
+    {
+        private readonly MisterConnection<TKey, TValue, MisterStreamObjectSource, MisterStreamObjectSource> _underlyingConnection;
+        private readonly RecyclableMemoryStreamManager _streamManager;
+
+        public MisterConnection(DirectoryInfo directory, IMisterStreamSerializer<TKey> keySerializer, IMisterStreamSerializer<TValue> valueSerializer, MisterConnectionSettings settings = null)
+            : this(directory, keySerializer, valueSerializer, settings, null)
+        {
+        }
+
+        public MisterConnection(DirectoryInfo directory, IMisterStreamSerializer<TKey> keySerializer, IMisterStreamSerializer<TValue> valueSerializer, MisterConnectionSettings settings = null, RecyclableMemoryStreamManager streamManager = null)
+        {
+            if (directory == null)
+                throw new ArgumentNullException(nameof(directory));
+
+            if (keySerializer == null)
+                throw new ArgumentNullException(nameof(keySerializer));
+
+            if (valueSerializer == null)
+                throw new ArgumentNullException(nameof(valueSerializer));
+
+            _streamManager = streamManager ?? new RecyclableMemoryStreamManager(1024, 4 * 1024, 1024 * 1024);
+
+            var streamKeySerializer = new MisterStreamSerializer<TKey>(keySerializer, _streamManager);
+            var streamValueSerializer = new MisterStreamSerializer<TValue>(valueSerializer, _streamManager);
+
+            _underlyingConnection = new MisterConnection<TKey, TValue, MisterStreamObjectSource, MisterStreamObjectSource>(directory, streamKeySerializer, streamValueSerializer, settings);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void Close()
+        {
+            _underlyingConnection.Close();
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void Checkpoint()
+        {
+            _underlyingConnection.Checkpoint();
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Task CheckpointAsync()
+        {
+            return _underlyingConnection.CheckpointAsync();
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Task<TValue> GetAsync(TKey key)
+        {
+            return _underlyingConnection.GetAsync(key);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Task SetAsync(TKey key, TValue value)
+        {
+            return _underlyingConnection.SetAsync(key, value);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Task SetAsync(TKey key, TValue value, bool waitPending)
+        {
+            return _underlyingConnection.SetAsync(key, value, waitPending);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Task DeleteAsync(TKey key)
+        {
+            return _underlyingConnection.DeleteAsync(key);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Task DeleteAsync(TKey key, bool waitPending)
+        {
+            return _underlyingConnection.DeleteAsync(key);
+        }
+    }
+
+    public sealed class MisterConnection<TKey, TValue, TKeyObjectSource, TValueObjectSource>
+        where TKeyObjectSource : struct, IMisterObjectSource
+        where TValueObjectSource : struct, IMisterObjectSource
     {
         private static readonly ILog Log = LogManager.GetLogger("MisterConnection");
 
@@ -50,14 +163,14 @@ namespace Marius.Mister
         }
 
         private readonly DirectoryInfo _directory;
-        private readonly IMisterSerializer<TKey> _keySerializer;
-        private readonly IMisterSerializer<TValue> _valueSerializer;
+        private readonly IMisterSerializer<TKey, TKeyObjectSource> _keySerializer;
+        private readonly IMisterSerializer<TValue, TValueObjectSource> _valueSerializer;
         private readonly MisterConnectionSettings _settings;
         private readonly string _name;
         private readonly RecyclableMemoryStreamManager _streamManager;
         private readonly CancellationTokenSource _cancellationTokenSource;
 
-        private FasterKV<MisterObject, MisterObject, byte[], TValue, Empty, MisterObjectEnvironment<TValue>> _faster;
+        private FasterKV<MisterObject, MisterObject, byte[], TValue, Empty, MisterObjectEnvironment<TValue, TValueObjectSource>> _faster;
         private IDevice _mainLog;
 
         private ConcurrentQueue<MisterWorkItem> _workQueue;
@@ -72,7 +185,7 @@ namespace Marius.Mister
 
         private bool _isClosed;
 
-        public MisterConnection(DirectoryInfo directory, IMisterSerializer<TKey> keySerializer, IMisterSerializer<TValue> valueSerializer, MisterConnectionSettings settings = null, string name = null)
+        public MisterConnection(DirectoryInfo directory, IMisterSerializer<TKey, TKeyObjectSource> keySerializer, IMisterSerializer<TValue, TValueObjectSource> valueSerializer, MisterConnectionSettings settings = null, string name = null)
         {
             if (directory == null)
                 throw new ArgumentNullException(nameof(directory));
@@ -246,18 +359,14 @@ namespace Marius.Mister
             {
                 var input = default(byte[]);
                 var output = default(TValue);
-                using (var keyStream = _streamManager.GetStream())
+
+                using (var source = _keySerializer.Serialize(key))
                 {
-                    keyStream.Position = 4;
-                    _keySerializer.Serialize(keyStream, key);
-
-                    var keyLength = (int)keyStream.Length - 4;
-                    var keyBuffer = keyStream.GetBuffer();
-
-                    fixed (byte* keyPointer = keyBuffer)
+                    ref var keyBuffer = ref source.GetObjectBuffer(out var length);
+                    fixed (byte* keyPointer = &keyBuffer)
                     {
                         ref var misterKey = ref *(MisterObject*)keyPointer;
-                        misterKey.Length = keyLength;
+                        misterKey.Length = length;
 
                         do
                         {
@@ -299,27 +408,17 @@ namespace Marius.Mister
 
             try
             {
-                using (var keyStream = _streamManager.GetStream())
-                using (var valueStream = _streamManager.GetStream())
+                using (var keySource = _keySerializer.Serialize(key))
+                using (var valueSource = _valueSerializer.Serialize(value))
                 {
-                    keyStream.Position = 4;
-                    _keySerializer.Serialize(keyStream, key);
-
-                    valueStream.Position = 4;
-                    _valueSerializer.Serialize(valueStream, value);
-
-                    var keyLength = (int)keyStream.Length - 4;
-                    var keyBuffer = keyStream.GetBuffer();
-
-                    var valueLength = (int)valueStream.Length - 4;
-                    var valueBuffer = valueStream.GetBuffer();
-
-                    fixed (byte* keyPointer = keyBuffer, valuePointer = valueBuffer)
+                    ref var keyBuffer = ref keySource.GetObjectBuffer(out var keyLength);
+                    ref var valueBuffer = ref valueSource.GetObjectBuffer(out var valueLength);
+                    fixed (byte* keyPointer = &keyBuffer, valuePointer = &valueBuffer)
                     {
                         ref var misterKey = ref *(MisterObject*)keyPointer;
-                        misterKey.Length = keyLength;
-
                         ref var misterValue = ref *(MisterObject*)valuePointer;
+
+                        misterKey.Length = keyLength;
                         misterValue.Length = valueLength;
 
                         do
@@ -362,14 +461,10 @@ namespace Marius.Mister
 
             try
             {
-                using (var keyStream = _streamManager.GetStream())
+                using (var keySource = _keySerializer.Serialize(key))
                 {
-                    keyStream.Position = 4;
-                    _keySerializer.Serialize(keyStream, key);
-
-                    var length = (int)keyStream.Length - 4;
-                    var buffer = keyStream.GetBuffer();
-                    fixed (byte* keyPointer = buffer)
+                    ref var buffer = ref keySource.GetObjectBuffer(out var length);
+                    fixed (byte* keyPointer = &buffer)
                     {
                         ref var misterKey = ref *(MisterObject*)keyPointer;
                         misterKey.Length = length;
@@ -470,9 +565,9 @@ namespace Marius.Mister
             };
 
             _mainLog = Devices.CreateLogDevice(Path.Combine(_directory.FullName, @"hlog.log"));
-            _faster = new FasterKV<MisterObject, MisterObject, byte[], TValue, Empty, MisterObjectEnvironment<TValue>>(
+            _faster = new FasterKV<MisterObject, MisterObject, byte[], TValue, Empty, MisterObjectEnvironment<TValue, TValueObjectSource>>(
                 1L << 20,
-                new MisterObjectEnvironment<TValue>(_valueSerializer),
+                new MisterObjectEnvironment<TValue, TValueObjectSource>(_valueSerializer),
                 new LogSettings { LogDevice = _mainLog, },
                 new CheckpointSettings() { CheckpointDir = _directory.FullName, CheckPointType = CheckpointType.FoldOver },
                 serializerSettings: null,

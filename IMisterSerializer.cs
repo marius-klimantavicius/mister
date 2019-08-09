@@ -1,10 +1,9 @@
-﻿using System.IO;
-
-namespace Marius.Mister
+﻿namespace Marius.Mister
 {
-    public interface IMisterSerializer<T>
+    public interface IMisterSerializer<T, TObjectSource>
+        where TObjectSource: struct, IMisterObjectSource
     {
-        void Serialize(Stream stream, T value);
-        T Deserialize(Stream stream);
+        TObjectSource Serialize(T value);
+        T Deserialize(ref byte value, int length);
     }
 }

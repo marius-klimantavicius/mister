@@ -1,20 +1,24 @@
-﻿using System.IO;
-using System.Text;
+﻿using System;
+using System.Buffers;
 
 namespace Marius.Mister
 {
-    public unsafe class MisterStringSerializer : IMisterSerializer<string>
+    public unsafe class MisterStringSerializer : IMisterSerializer<string, MisterPoolBufferObjectSource>
     {
-        public string Deserialize(Stream stream)
+        public MisterPoolBufferObjectSource Serialize(string value)
         {
-            using (var reader = new StreamReader(stream, Encoding.UTF8, false, 128, true))
-                return reader.ReadToEnd();
+            var buffer = ArrayPool<byte>.Shared.Rent(value.Length * sizeof(char) + 4);
+            fixed (byte* ptr = &buffer[4])
+            fixed (char* data = value)
+                Buffer.MemoryCopy(data, ptr, buffer.Length - 4, value.Length * sizeof(char));
+
+            return new MisterPoolBufferObjectSource(buffer, value.Length * sizeof(char));
         }
 
-        public void Serialize(Stream stream, string value)
+        public string Deserialize(ref byte value, int length)
         {
-            using (var writer = new StreamWriter(stream, Encoding.UTF8, 128, true))
-                writer.Write(value);
+            fixed (byte* ptr = &value)
+                return new string((char*)ptr, 0, length / sizeof(char));
         }
     }
 }

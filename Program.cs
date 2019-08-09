@@ -13,7 +13,7 @@ namespace Marius.Mister
         static void Main(string[] args)
         {
             var serializer = new MisterStringSerializer();
-            var connection = new MisterConnection<string, string>(new DirectoryInfo(@"C:\Mister"), serializer, serializer);
+            var connection = MisterConnection.Create(new DirectoryInfo(@"C:\Mister"), serializer, serializer);
 
             var sw = Stopwatch.StartNew();
             while (true)
