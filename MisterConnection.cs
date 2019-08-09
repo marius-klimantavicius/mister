@@ -53,17 +53,17 @@ namespace Marius.Mister
         private readonly IMisterSerializer<TKey> _keySerializer;
         private readonly IMisterSerializer<TValue> _valueSerializer;
         private readonly MisterConnectionSettings _settings;
-
+        private readonly string _name;
         private readonly RecyclableMemoryStreamManager _streamManager;
         private readonly CancellationTokenSource _cancellationTokenSource;
 
         private FasterKV<MisterObject, MisterObject, byte[], TValue, Empty, MisterObjectEnvironment<TValue>> _faster;
         private IDevice _mainLog;
 
-        private BlockingCollection<MisterWorkItem> _workQueue;
+        private ConcurrentQueue<MisterWorkItem> _workQueue;
         private Thread[] _workerThreads;
 
-        private BlockingCollection<MisterCheckpointItem> _checkpointQueue;
+        private ConcurrentQueue<MisterCheckpointItem> _checkpointQueue;
         private Thread _checkpointThread;
 
         private int _checkpointVersion;
@@ -72,7 +72,7 @@ namespace Marius.Mister
 
         private bool _isClosed;
 
-        public MisterConnection(DirectoryInfo directory, IMisterSerializer<TKey> keySerializer, IMisterSerializer<TValue> valueSerializer, MisterConnectionSettings settings = null)
+        public MisterConnection(DirectoryInfo directory, IMisterSerializer<TKey> keySerializer, IMisterSerializer<TValue> valueSerializer, MisterConnectionSettings settings = null, string name = null)
         {
             if (directory == null)
                 throw new ArgumentNullException(nameof(directory));
@@ -87,7 +87,7 @@ namespace Marius.Mister
             _keySerializer = keySerializer;
             _valueSerializer = valueSerializer;
             _settings = settings ?? new MisterConnectionSettings();
-
+            _name = name;
             _streamManager = new RecyclableMemoryStreamManager(1024, 4 * 1024, 1024 * 1024);
             _cancellationTokenSource = new CancellationTokenSource();
 
@@ -104,6 +104,12 @@ namespace Marius.Mister
             PerformCheckpoint();
 
             _cancellationTokenSource.Cancel();
+
+            lock (_workQueue)
+                Monitor.PulseAll(_workQueue);
+
+            lock (_checkpointQueue)
+                Monitor.PulseAll(_checkpointQueue);
 
             for (var i = 0; i < _workerThreads.Length; i++)
                 _workerThreads[i].Join();
@@ -137,12 +143,16 @@ namespace Marius.Mister
                 throw new ObjectDisposedException("MisterConnection");
 
             var tsc = new TaskCompletionSource<TValue>(TaskCreationOptions.RunContinuationsAsynchronously);
-            _workQueue.Add(new MisterWorkItem()
+            _workQueue.Enqueue(new MisterWorkItem()
             {
                 Key = key,
                 State = tsc,
                 Action = PerformGet,
             });
+
+            lock (_workQueue)
+                Monitor.Pulse(_workQueue);
+
             return tsc.Task;
         }
 
@@ -152,13 +162,17 @@ namespace Marius.Mister
                 throw new ObjectDisposedException("MisterConnection");
 
             var tsc = new TaskCompletionSource<MisterVoid>(TaskCreationOptions.RunContinuationsAsynchronously);
-            _workQueue.Add(new MisterWorkItem()
+            _workQueue.Enqueue(new MisterWorkItem()
             {
                 Key = key,
                 Value = value,
                 State = tsc,
                 Action = PerformSet,
             });
+
+            lock (_workQueue)
+                Monitor.Pulse(_workQueue);
+
             return tsc.Task;
         }
 
@@ -168,7 +182,7 @@ namespace Marius.Mister
                 throw new ObjectDisposedException("MisterConnection");
 
             var tsc = new TaskCompletionSource<MisterVoid>(TaskCreationOptions.RunContinuationsAsynchronously);
-            _workQueue.Add(new MisterWorkItem()
+            _workQueue.Enqueue(new MisterWorkItem()
             {
                 Key = key,
                 Value = value,
@@ -176,6 +190,10 @@ namespace Marius.Mister
                 WaitPending = waitPending,
                 Action = PerformSet,
             });
+
+            lock (_workQueue)
+                Monitor.Pulse(_workQueue);
+
             return tsc.Task;
         }
 
@@ -185,12 +203,16 @@ namespace Marius.Mister
                 throw new ObjectDisposedException("MisterConnection");
 
             var tsc = new TaskCompletionSource<MisterVoid>(TaskCreationOptions.RunContinuationsAsynchronously);
-            _workQueue.Add(new MisterWorkItem()
+            _workQueue.Enqueue(new MisterWorkItem()
             {
                 Key = key,
                 State = tsc,
                 Action = PerformDelete,
             });
+
+            lock (_workQueue)
+                Monitor.Pulse(_workQueue);
+
             return tsc.Task;
         }
 
@@ -200,13 +222,17 @@ namespace Marius.Mister
                 throw new ObjectDisposedException("MisterConnection");
 
             var tsc = new TaskCompletionSource<MisterVoid>(TaskCreationOptions.RunContinuationsAsynchronously);
-            _workQueue.Add(new MisterWorkItem()
+            _workQueue.Enqueue(new MisterWorkItem()
             {
                 Key = key,
                 State = tsc,
                 WaitPending = waitPending,
                 Action = PerformDelete,
             });
+
+            lock (_workQueue)
+                Monitor.Pulse(_workQueue);
+
             return tsc.Task;
         }
 
@@ -307,7 +333,6 @@ namespace Marius.Mister
                     }
                 }
 
-
                 if (state != null)
                 {
                     var tsc = Unsafe.As<TaskCompletionSource<MisterVoid>>(state);
@@ -384,14 +409,22 @@ namespace Marius.Mister
         private void PerformCheckpoint()
         {
             var handle = new AutoResetEvent(false);
-            _checkpointQueue.Add(new MisterCheckpointItem(handle));
+            _checkpointQueue.Enqueue(new MisterCheckpointItem(handle));
+
+            lock (_checkpointQueue)
+                Monitor.Pulse(_checkpointQueue);
+
             handle.WaitOne();
         }
 
         private Task PerformCheckpointAsync()
         {
             var tsc = new TaskCompletionSource<MisterVoid>(TaskCreationOptions.RunContinuationsAsynchronously);
-            _checkpointQueue.Add(new MisterCheckpointItem(tsc));
+            _checkpointQueue.Enqueue(new MisterCheckpointItem(tsc));
+
+            lock (_checkpointQueue)
+                Monitor.Pulse(_checkpointQueue);
+
             return tsc.Task;
         }
 
@@ -408,13 +441,13 @@ namespace Marius.Mister
                     Create();
             }
 
-            _workQueue = new BlockingCollection<MisterWorkItem>();
+            _workQueue = new ConcurrentQueue<MisterWorkItem>();
             _workerThreads = new Thread[_settings.WorkerThreadCount];
             for (var i = 0; i < _workerThreads.Length; i++)
-                _workerThreads[i] = new Thread(WorkerLoop) { IsBackground = true };
+                _workerThreads[i] = new Thread(WorkerLoop) { IsBackground = true, Name = $"{_name ?? "Mister"} worker thread #{i + 1}" };
 
-            _checkpointQueue = new BlockingCollection<MisterCheckpointItem>();
-            _checkpointThread = new Thread(CheckpointLoop) { IsBackground = true };
+            _checkpointQueue = new ConcurrentQueue<MisterCheckpointItem>();
+            _checkpointThread = new Thread(CheckpointLoop) { IsBackground = true, Name = $"{_name ?? "Mister"} checkpoint thread" };
 
             for (var i = 0; i < _workerThreads.Length; i++)
                 _workerThreads[i].Start(i.ToString());
@@ -552,8 +585,20 @@ namespace Marius.Mister
 
                 while (!_cancellationTokenSource.IsCancellationRequested)
                 {
-                    if (_workQueue.TryTake(out var item, workerRefreshIntervalMilliseconds))
+                    var needRefresh = false;
+                    if (_workQueue.IsEmpty)
                     {
+                        lock (_workQueue)
+                        {
+                            if (_workQueue.IsEmpty && !_cancellationTokenSource.IsCancellationRequested)
+                                needRefresh = !Monitor.Wait(_workQueue, workerRefreshIntervalMilliseconds);
+                        }
+                    }
+
+                    while (_workQueue.TryDequeue(out var item) && !_cancellationTokenSource.IsCancellationRequested)
+                    {
+                        needRefresh = false;
+
                         if (!item.Action(ref item, sequence))
                             hasPending = true;
 
@@ -569,7 +614,8 @@ namespace Marius.Mister
                             _faster.Refresh();
                         }
                     }
-                    else
+
+                    if (needRefresh)
                     {
                         if (hasPending)
                         {
@@ -624,11 +670,13 @@ namespace Marius.Mister
                 while (!_cancellationTokenSource.IsCancellationRequested)
                 {
                     var checkpointItem = default(MisterCheckpointItem);
-                    try
+                    lock (_checkpointQueue)
                     {
-                        _checkpointQueue.TryTake(out checkpointItem, checkpointIntervalMilliseconds, _cancellationTokenSource.Token);
+                        if (_checkpointQueue.IsEmpty && !_cancellationTokenSource.IsCancellationRequested)
+                            Monitor.Wait(_checkpointQueue, checkpointIntervalMilliseconds);
                     }
-                    catch (OperationCanceledException) { }
+
+                    _checkpointQueue.TryDequeue(out checkpointItem);
 
                     var lockTaken = false;
                     try
