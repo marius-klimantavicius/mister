@@ -8,7 +8,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using FASTER.core;
 using log4net;
-using Microsoft.IO;
 
 namespace Marius.Mister
 {
@@ -21,25 +20,25 @@ namespace Marius.Mister
             return new MisterConnection<TKey, TValue, TKeyObjectSource, TValueObjectSource>(directory, keySerializer, valueSerializer, settings, name);
         }
 
-        public static MisterConnection<TKey, TValue, MisterStreamObjectSource, TValueObjectSource> Create<TKey, TValue, TValueObjectSource>(DirectoryInfo directory, IMisterStreamSerializer<TKey> keyStreamSerializer, IMisterSerializer<TValue, TValueObjectSource> valueSerializer, MisterConnectionSettings settings = null, string name = null, RecyclableMemoryStreamManager streamManager = null)
+        public static MisterConnection<TKey, TValue, MisterStreamObjectSource, TValueObjectSource> Create<TKey, TValue, TValueObjectSource>(DirectoryInfo directory, IMisterStreamSerializer<TKey> keyStreamSerializer, IMisterSerializer<TValue, TValueObjectSource> valueSerializer, MisterConnectionSettings settings = null, string name = null, IMisterStreamManager streamManager = null)
             where TValueObjectSource : struct, IMisterObjectSource
         {
-            streamManager = streamManager ?? new RecyclableMemoryStreamManager(1024, 4 * 1024, 1024 * 1024);
+            streamManager = streamManager ?? MisterArrayPoolStreamManager.Default;
             var keySerializer = new MisterStreamSerializer<TKey>(keyStreamSerializer, streamManager);
 
             return new MisterConnection<TKey, TValue, MisterStreamObjectSource, TValueObjectSource>(directory, keySerializer, valueSerializer, settings, name);
         }
 
-        public static MisterConnection<TKey, TValue, TKeyObjectSource, MisterStreamObjectSource> Create<TKey, TValue, TKeyObjectSource>(DirectoryInfo directory, IMisterSerializer<TKey, TKeyObjectSource> keySerializer, IMisterStreamSerializer<TValue> valueStreamSerializer, MisterConnectionSettings settings = null, string name = null, RecyclableMemoryStreamManager streamManager = null)
+        public static MisterConnection<TKey, TValue, TKeyObjectSource, MisterStreamObjectSource> Create<TKey, TValue, TKeyObjectSource>(DirectoryInfo directory, IMisterSerializer<TKey, TKeyObjectSource> keySerializer, IMisterStreamSerializer<TValue> valueStreamSerializer, MisterConnectionSettings settings = null, string name = null, IMisterStreamManager streamManager = null)
             where TKeyObjectSource : struct, IMisterObjectSource
         {
-            streamManager = streamManager ?? new RecyclableMemoryStreamManager(1024, 4 * 1024, 1024 * 1024);
+            streamManager = streamManager ?? MisterArrayPoolStreamManager.Default;
             var valueSerializer = new MisterStreamSerializer<TValue>(valueStreamSerializer, streamManager);
 
             return new MisterConnection<TKey, TValue, TKeyObjectSource, MisterStreamObjectSource>(directory, keySerializer, valueSerializer, settings, name);
         }
 
-        public static MisterConnection<TKey, TValue> Create<TKey, TValue>(DirectoryInfo directory, IMisterStreamSerializer<TKey> keySerializer, IMisterStreamSerializer<TValue> valueSerializer, MisterConnectionSettings settings = null, string name = null, RecyclableMemoryStreamManager streamManager = null)
+        public static MisterConnection<TKey, TValue> Create<TKey, TValue>(DirectoryInfo directory, IMisterStreamSerializer<TKey> keySerializer, IMisterStreamSerializer<TValue> valueSerializer, MisterConnectionSettings settings = null, string name = null, IMisterStreamManager streamManager = null)
         {
             return new MisterConnection<TKey, TValue>(directory, keySerializer, valueSerializer, settings, name, streamManager);
         }
@@ -48,14 +47,14 @@ namespace Marius.Mister
     public sealed class MisterConnection<TKey, TValue>
     {
         private readonly MisterConnection<TKey, TValue, MisterStreamObjectSource, MisterStreamObjectSource> _underlyingConnection;
-        private readonly RecyclableMemoryStreamManager _streamManager;
+        private readonly IMisterStreamManager _streamManager;
 
         public MisterConnection(DirectoryInfo directory, IMisterStreamSerializer<TKey> keySerializer, IMisterStreamSerializer<TValue> valueSerializer, MisterConnectionSettings settings = null, string name = null)
             : this(directory, keySerializer, valueSerializer, settings, name, null)
         {
         }
 
-        public MisterConnection(DirectoryInfo directory, IMisterStreamSerializer<TKey> keySerializer, IMisterStreamSerializer<TValue> valueSerializer, MisterConnectionSettings settings = null, string name = null, RecyclableMemoryStreamManager streamManager = null)
+        public MisterConnection(DirectoryInfo directory, IMisterStreamSerializer<TKey> keySerializer, IMisterStreamSerializer<TValue> valueSerializer, MisterConnectionSettings settings = null, string name = null, IMisterStreamManager streamManager = null)
         {
             if (directory == null)
                 throw new ArgumentNullException(nameof(directory));
@@ -66,7 +65,7 @@ namespace Marius.Mister
             if (valueSerializer == null)
                 throw new ArgumentNullException(nameof(valueSerializer));
 
-            _streamManager = streamManager ?? new RecyclableMemoryStreamManager(1024, 4 * 1024, 1024 * 1024);
+            _streamManager = streamManager ?? MisterArrayPoolStreamManager.Default;
 
             var streamKeySerializer = new MisterStreamSerializer<TKey>(keySerializer, _streamManager);
             var streamValueSerializer = new MisterStreamSerializer<TValue>(valueSerializer, _streamManager);
@@ -234,24 +233,21 @@ namespace Marius.Mister
 
         public void Checkpoint()
         {
-            if (_isClosed)
-                throw new ObjectDisposedException("MisterConnection");
+            CheckDisposed();
 
             PerformCheckpoint();
         }
 
         public Task CheckpointAsync()
         {
-            if (_isClosed)
-                throw new ObjectDisposedException("MisterConnection");
+            CheckDisposed();
 
             return PerformCheckpointAsync();
         }
 
         public Task<TValue> GetAsync(TKey key)
         {
-            if (_isClosed)
-                throw new ObjectDisposedException("MisterConnection");
+            CheckDisposed();
 
             var tsc = new TaskCompletionSource<TValue>(TaskCreationOptions.RunContinuationsAsynchronously);
             _workQueue.Enqueue(new MisterWorkItem()
@@ -269,8 +265,7 @@ namespace Marius.Mister
 
         public Task SetAsync(TKey key, TValue value)
         {
-            if (_isClosed)
-                throw new ObjectDisposedException("MisterConnection");
+            CheckDisposed();
 
             var tsc = new TaskCompletionSource<MisterVoid>(TaskCreationOptions.RunContinuationsAsynchronously);
             _workQueue.Enqueue(new MisterWorkItem()
@@ -289,8 +284,7 @@ namespace Marius.Mister
 
         public Task SetAsync(TKey key, TValue value, bool waitPending)
         {
-            if (_isClosed)
-                throw new ObjectDisposedException("MisterConnection");
+            CheckDisposed();
 
             var tsc = new TaskCompletionSource<MisterVoid>(TaskCreationOptions.RunContinuationsAsynchronously);
             _workQueue.Enqueue(new MisterWorkItem()
@@ -310,8 +304,7 @@ namespace Marius.Mister
 
         public Task DeleteAsync(TKey key)
         {
-            if (_isClosed)
-                throw new ObjectDisposedException("MisterConnection");
+            CheckDisposed();
 
             var tsc = new TaskCompletionSource<MisterVoid>(TaskCreationOptions.RunContinuationsAsynchronously);
             _workQueue.Enqueue(new MisterWorkItem()
@@ -329,8 +322,7 @@ namespace Marius.Mister
 
         public Task DeleteAsync(TKey key, bool waitPending)
         {
-            if (_isClosed)
-                throw new ObjectDisposedException("MisterConnection");
+            CheckDisposed();
 
             var tsc = new TaskCompletionSource<MisterVoid>(TaskCreationOptions.RunContinuationsAsynchronously);
             _workQueue.Enqueue(new MisterWorkItem()
@@ -564,14 +556,21 @@ namespace Marius.Mister
 
             _mainLog = Devices.CreateLogDevice(Path.Combine(_directory.FullName, @"hlog.log"));
             _faster = new FasterKV<MisterObject, MisterObject, byte[], TValue, Empty, MisterObjectEnvironment<TValue, TValueObjectSource>>(
-                1L << 20,
+                _settings.IndexSize,
                 new MisterObjectEnvironment<TValue, TValueObjectSource>(_valueSerializer),
-                new LogSettings { LogDevice = _mainLog, },
+                new LogSettings { LogDevice = _mainLog },
                 new CheckpointSettings() { CheckpointDir = _directory.FullName, CheckPointType = CheckpointType.FoldOver },
                 serializerSettings: null,
                 comparer: new MisterObjectEqualityComparer(),
                 variableLengthStructSettings: variableLengthStructSettings
             );
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void CheckDisposed()
+        {
+            if (_isClosed)
+                throw new ObjectDisposedException("MisterConnection");
         }
 
         private bool TryRecover(FileInfo checkpointTokenFile)

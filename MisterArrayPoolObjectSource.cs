@@ -2,12 +2,12 @@
 
 namespace Marius.Mister
 {
-    public struct MisterPoolBufferObjectSource : IMisterObjectSource
+    public struct MisterArrayPoolObjectSource : IMisterObjectSource
     {
         private readonly byte[] _buffer;
         private readonly int _length;
 
-        public MisterPoolBufferObjectSource(byte[] buffer, int length)
+        public MisterArrayPoolObjectSource(byte[] buffer, int length)
         {
             _buffer = buffer;
             _length = length;

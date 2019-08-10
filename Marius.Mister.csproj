@@ -108,12 +108,12 @@
     <Compile Include="FASTER.core\Utilities\Status.cs" />
     <Compile Include="FASTER.core\Utilities\Utility.cs" />
     <Compile Include="IMisterObjectSource.cs" />
+    <Compile Include="IMisterStreamManager.cs" />
     <Compile Include="IMisterStreamSerializer.cs" />
     <Compile Include="IMisterSerializer.cs" />
-    <Compile Include="Microsoft.IO\Events.cs" />
-    <Compile Include="Microsoft.IO\RecyclableMemoryStream.cs" />
-    <Compile Include="Microsoft.IO\RecyclableMemoryStreamManager.cs" />
-    <Compile Include="MisterPoolBufferObjectSource.cs" />
+    <Compile Include="MisterArrayPoolStream.cs" />
+    <Compile Include="MisterArrayPoolObjectSource.cs" />
+    <Compile Include="MisterArrayPoolStreamManager.cs" />
     <Compile Include="MisterConnection.cs" />
     <Compile Include="MisterConnectionSettings.cs" />
     <Compile Include="MisterLongSerializer.cs" />

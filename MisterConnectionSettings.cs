@@ -14,8 +14,12 @@ namespace Marius.Mister
         public int WorkerThreadCount { get; set; }
         public int WorkerRefreshIntervalMilliseconds { get; set; }
 
+        public long IndexSize { get; set; }
+
         public MisterConnectionSettings()
         {
+            IndexSize = 1L << 20;
+
             CheckpointIntervalMilliseconds = 10 * 60 * 1000;
             CheckpointCleanCount = 16;
 

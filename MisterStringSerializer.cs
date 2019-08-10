@@ -3,16 +3,16 @@ using System.Buffers;
 
 namespace Marius.Mister
 {
-    public unsafe class MisterStringSerializer : IMisterSerializer<string, MisterPoolBufferObjectSource>
+    public unsafe class MisterStringSerializer : IMisterSerializer<string, MisterArrayPoolObjectSource>
     {
-        public MisterPoolBufferObjectSource Serialize(string value)
+        public MisterArrayPoolObjectSource Serialize(string value)
         {
             var buffer = ArrayPool<byte>.Shared.Rent(value.Length * sizeof(char) + 4);
             fixed (byte* ptr = &buffer[4])
             fixed (char* data = value)
                 Buffer.MemoryCopy(data, ptr, buffer.Length - 4, value.Length * sizeof(char));
 
-            return new MisterPoolBufferObjectSource(buffer, value.Length * sizeof(char));
+            return new MisterArrayPoolObjectSource(buffer, value.Length * sizeof(char));
         }
 
         public string Deserialize(ref byte value, int length)

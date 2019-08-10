@@ -1,14 +1,13 @@
 ﻿using System.IO;
-using Microsoft.IO;
 
 namespace Marius.Mister
 {
     public class MisterStreamSerializer<T> : IMisterSerializer<T, MisterStreamObjectSource>
     {
         private readonly IMisterStreamSerializer<T> _streamSerializer;
-        private readonly RecyclableMemoryStreamManager _streamManager;
+        private readonly IMisterStreamManager _streamManager;
 
-        public MisterStreamSerializer(IMisterStreamSerializer<T> streamSerializer, RecyclableMemoryStreamManager streamManager)
+        public MisterStreamSerializer(IMisterStreamSerializer<T> streamSerializer, IMisterStreamManager streamManager)
         {
             _streamSerializer = streamSerializer;
             _streamManager = streamManager;

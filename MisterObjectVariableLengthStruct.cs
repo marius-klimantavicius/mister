@@ -16,9 +16,7 @@ namespace Marius.Mister
 
         public int GetLength(ref MisterObject t)
         {
-            var length = (t.Length + 3) & (~3); // align to 4
-
-            return sizeof(int) + length;
+            return sizeof(int) + t.Length;
         }
     }
 }
