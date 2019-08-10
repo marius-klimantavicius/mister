@@ -22,6 +22,7 @@ namespace FASTER.core
 
         private bool first = true;
         private long currentAddress, nextAddress;
+        private long currentPhysicalAddress;
 
         /// <summary>
         /// Current address
@@ -71,30 +72,32 @@ namespace FASTER.core
             }
         }
 
-        private long _currentPhysicalAddress;
-
+        /// <summary>
+        /// Gets reference to current key
+        /// </summary>
+        /// <returns></returns>
         public ref Key GetKey()
         {
-            return ref hlog.GetKey(_currentPhysicalAddress);
+            return ref hlog.GetKey(currentPhysicalAddress);
         }
 
+        /// <summary>
+        /// Gets reference to current value
+        /// </summary>
+        /// <returns></returns>
         public ref Value GetValue()
         {
-            return ref hlog.GetValue(_currentPhysicalAddress);
+            return ref hlog.GetValue(currentPhysicalAddress);
         }
 
         /// <summary>
         /// Get next record in iterator
         /// </summary>
         /// <param name="recordInfo"></param>
-        /// <param name="key"></param>
-        /// <param name="value"></param>
         /// <returns></returns>
-        public bool GetNext(out RecordInfo recordInfo, out Key key, out Value value)
+        public bool GetNext(out RecordInfo recordInfo)
         {
             recordInfo = default(RecordInfo);
-            key = default(Key);
-            value = default(Value);
 
             currentAddress = nextAddress;
             while (true)
@@ -129,7 +132,6 @@ namespace FASTER.core
                     continue;
                 }
 
-
                 if (currentAddress >= hlog.HeadAddress)
                 {
                     // Read record from cached page memory
@@ -141,10 +143,8 @@ namespace FASTER.core
                         continue;
                     }
 
-                    _currentPhysicalAddress = _physicalAddress;
+                    currentPhysicalAddress = _physicalAddress;
                     recordInfo = hlog.GetInfo(_physicalAddress);
-                    key = hlog.GetKey(_physicalAddress);
-                    value = hlog.GetValue(_physicalAddress);
                     nextAddress = currentAddress + hlog.GetRecordSize(_physicalAddress);
                     return true;
                 }
@@ -157,13 +157,23 @@ namespace FASTER.core
                     continue;
                 }
 
-                _currentPhysicalAddress = physicalAddress;
+                currentPhysicalAddress = physicalAddress;
                 recordInfo = hlog.GetInfo(physicalAddress);
-                key = hlog.GetKey(physicalAddress);
-                value = hlog.GetValue(physicalAddress);
                 nextAddress = currentAddress + hlog.GetRecordSize(physicalAddress);
                 return true;
             }
+        }
+
+        /// <summary>
+        /// Get next record in iterator
+        /// </summary>
+        /// <param name="recordInfo"></param>
+        /// <param name="key"></param>
+        /// <param name="value"></param>
+        /// <returns></returns>
+        public bool GetNext(out RecordInfo recordInfo, out Key key, out Value value)
+        {
+            throw new NotSupportedException("Use GetNext(out RecordInfo) to retrieve references to key/value");
         }
 
         /// <summary>

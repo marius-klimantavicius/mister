@@ -23,6 +23,8 @@ namespace FASTER.core
 
         private bool first = true;
         private long currentAddress, nextAddress;
+        private Key currentKey;
+        private Value currentValue;
 
         /// <summary>
         /// Current address
@@ -74,31 +76,34 @@ namespace FASTER.core
             }
         }
 
-        private Key _key;
-        private Value _value;
-
+        /// <summary>
+        /// Gets reference to current key
+        /// </summary>
+        /// <returns></returns>
         public ref Key GetKey()
         {
-            return ref _key;
-        }
-
-        public ref Value GetValue()
-        {
-            return ref _value;
+            return ref currentKey;
         }
 
         /// <summary>
-        /// Get next record using iterator
+        /// Gets reference to current value
+        /// </summary>
+        /// <returns></returns>
+        public ref Value GetValue()
+        {
+            return ref currentValue;
+        }
+
+        /// <summary>
+        /// Get next record in iterator
         /// </summary>
         /// <param name="recordInfo"></param>
-        /// <param name="key"></param>
-        /// <param name="value"></param>
         /// <returns></returns>
-        public bool GetNext(out RecordInfo recordInfo, out Key key, out Value value)
+        public bool GetNext(out RecordInfo recordInfo)
         {
             recordInfo = default(RecordInfo);
-            key = default(Key);
-            value = default(Value);
+            currentKey = default(Key);
+            currentValue = default(Value);
 
             currentAddress = nextAddress;
             while (true)
@@ -133,7 +138,6 @@ namespace FASTER.core
                     continue;
                 }
 
-
                 if (currentAddress >= hlog.HeadAddress)
                 {
                     // Read record from cached page memory
@@ -145,11 +149,8 @@ namespace FASTER.core
                         continue;
 
                     recordInfo = hlog.values[page][offset].info;
-                    key = hlog.values[page][offset].key;
-                    value = hlog.values[page][offset].value;
-
-                    _key = key;
-                    _value = value;
+                    currentKey = hlog.values[page][offset].key;
+                    currentValue = hlog.values[page][offset].value;
                     return true;
                 }
 
@@ -161,13 +162,32 @@ namespace FASTER.core
                     continue;
 
                 recordInfo = frame.GetInfo(currentFrame, offset);
-                key = frame.GetKey(currentFrame, offset);
-                value = frame.GetValue(currentFrame, offset);
-
-                _key = key;
-                _value = value;
+                currentKey = frame.GetKey(currentFrame, offset);
+                currentValue = frame.GetValue(currentFrame, offset);
                 return true;
             }
+        }
+
+        /// <summary>
+        /// Get next record using iterator
+        /// </summary>
+        /// <param name="recordInfo"></param>
+        /// <param name="key"></param>
+        /// <param name="value"></param>
+        /// <returns></returns>
+        public bool GetNext(out RecordInfo recordInfo, out Key key, out Value value)
+        {
+            key = default(Key);
+            value = default(Value);
+
+            if (GetNext(out recordInfo))
+            {
+                key = currentKey;
+                value = currentValue;
+                return true;
+            }
+
+            return false;
         }
 
         private unsafe void BufferAndLoad(long currentAddress, long currentPage, long currentFrame)
