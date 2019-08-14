@@ -52,6 +52,14 @@ namespace Marius.Mister
 
                     Console.WriteLine(sw.Elapsed);
                 }
+                else if (parts[0] == "cp")
+                {
+                    connection.Checkpoint();
+                }
+                else if (parts[0] == "flush")
+                {
+                    connection.FlushAsync(true).GetAwaiter().GetResult();
+                }
             }
             connection.Close();
             Console.WriteLine(sw.Elapsed);

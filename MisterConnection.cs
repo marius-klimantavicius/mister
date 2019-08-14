@@ -128,10 +128,6 @@ namespace Marius.Mister
     {
         private static readonly ILog Log = LogManager.GetLogger("MisterConnection");
 
-        private struct MisterVoid
-        {
-        }
-
         private delegate bool MisterWorkAction(ref MisterWorkItem workItem, long sequence);
 
         private struct MisterWorkItem
@@ -168,7 +164,7 @@ namespace Marius.Mister
         private readonly string _name;
         private readonly CancellationTokenSource _cancellationTokenSource;
 
-        private FasterKV<MisterObject, MisterObject, byte[], TValue, Empty, MisterObjectEnvironment<TValue, TValueObjectSource>> _faster;
+        private FasterKV<MisterObject, MisterObject, byte[], TValue, object, MisterObjectEnvironment<TValue, TValueObjectSource>> _faster;
         private IDevice _mainLog;
 
         private ConcurrentQueue<MisterWorkItem> _workQueue;
@@ -238,6 +234,24 @@ namespace Marius.Mister
             PerformCheckpoint();
         }
 
+        public Task FlushAsync(bool wait)
+        {
+            CheckDisposed();
+
+            var tsc = new TaskCompletionSource<MisterVoid>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _workQueue.Enqueue(new MisterWorkItem()
+            {
+                Action = PerformFlush,
+                State = tsc,
+                WaitPending = wait,
+            });
+
+            lock (_workQueue)
+                Monitor.Pulse(_workQueue);
+
+            return tsc.Task;
+        }
+
         public Task CheckpointAsync()
         {
             CheckDisposed();
@@ -255,6 +269,25 @@ namespace Marius.Mister
                 Key = key,
                 State = tsc,
                 Action = PerformGet,
+            });
+
+            lock (_workQueue)
+                Monitor.Pulse(_workQueue);
+
+            return tsc.Task;
+        }
+
+        public Task<TValue> GetAsync(TKey key, bool waitPending)
+        {
+            CheckDisposed();
+
+            var tsc = new TaskCompletionSource<TValue>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _workQueue.Enqueue(new MisterWorkItem()
+            {
+                Key = key,
+                State = tsc,
+                Action = PerformGet,
+                WaitPending = waitPending,
             });
 
             lock (_workQueue)
@@ -358,13 +391,13 @@ namespace Marius.Mister
                         ref var misterKey = ref *(MisterObject*)keyPointer;
                         misterKey.Length = length;
 
-                        do
+                        status = _faster.Read(ref misterKey, ref input, ref output, state, sequence);
+                        if (status == Status.PENDING)
                         {
-                            status = _faster.Read(ref misterKey, ref input, ref output, Empty.Default, sequence);
-                            if (status == Status.PENDING)
+                            if (workItem.WaitPending)
                                 _faster.CompletePending(true);
+                            return false;
                         }
-                        while (status == Status.PENDING);
                     }
                 }
 
@@ -411,14 +444,15 @@ namespace Marius.Mister
                         misterKey.Length = keyLength;
                         misterValue.Length = valueLength;
 
-                        do
-                        {
-                            status = _faster.Upsert(ref misterKey, ref misterValue, Empty.Default, sequence);
-                            if (workItem.WaitPending && status == Status.PENDING)
-                                _faster.CompletePending(true);
-                        } while (workItem.WaitPending && status == Status.PENDING);
-
+                        status = _faster.Upsert(ref misterKey, ref misterValue, state, sequence);
                         Interlocked.Increment(ref _checkpointVersion);
+
+                        if (status == Status.PENDING)
+                        {
+                            if (workItem.WaitPending)
+                                _faster.CompletePending(true);
+                            return false;
+                        }
                     }
                 }
 
@@ -459,14 +493,15 @@ namespace Marius.Mister
                         ref var misterKey = ref *(MisterObject*)keyPointer;
                         misterKey.Length = length;
 
-                        do
-                        {
-                            status = _faster.Delete(ref misterKey, Empty.Default, sequence);
-                            if (workItem.WaitPending && status == Status.PENDING)
-                                _faster.CompletePending(true);
-                        } while (workItem.WaitPending && status == Status.PENDING);
-
+                        status = _faster.Delete(ref misterKey, state, sequence);
                         Interlocked.Increment(ref _checkpointVersion);
+
+                        if (status == Status.PENDING)
+                        {
+                            if (workItem.WaitPending)
+                                _faster.CompletePending(true);
+                            return false;
+                        }
                     }
                 }
 
@@ -491,15 +526,45 @@ namespace Marius.Mister
             return status != Status.PENDING;
         }
 
+        private bool PerformFlush(ref MisterWorkItem workItem, long sequence)
+        {
+            var state = workItem.State;
+            var wait = workItem.WaitPending;
+
+            try
+            {
+                _faster.Log.FlushAndEvict(wait);
+                Interlocked.Increment(ref _checkpointVersion);
+
+                if (state != null)
+                {
+                    var tsc = Unsafe.As<TaskCompletionSource<MisterVoid>>(state);
+                    tsc.SetResult(default(MisterVoid));
+                }
+            }
+            catch (Exception ex)
+            {
+                if (state != null)
+                {
+                    var tsc = (TaskCompletionSource<MisterVoid>)state;
+                    tsc.SetException(ex);
+                }
+            }
+
+            return true;
+        }
+
         private void PerformCheckpoint()
         {
-            var handle = new AutoResetEvent(false);
-            _checkpointQueue.Enqueue(new MisterCheckpointItem(handle));
+            using (var handle = new AutoResetEvent(false))
+            {
+                _checkpointQueue.Enqueue(new MisterCheckpointItem(handle));
 
-            lock (_checkpointQueue)
-                Monitor.Pulse(_checkpointQueue);
+                lock (_checkpointQueue)
+                    Monitor.Pulse(_checkpointQueue);
 
-            handle.WaitOne();
+                handle.WaitOne();
+            }
         }
 
         private Task PerformCheckpointAsync()
@@ -555,7 +620,7 @@ namespace Marius.Mister
             };
 
             _mainLog = Devices.CreateLogDevice(Path.Combine(_directory.FullName, @"hlog.log"));
-            _faster = new FasterKV<MisterObject, MisterObject, byte[], TValue, Empty, MisterObjectEnvironment<TValue, TValueObjectSource>>(
+            _faster = new FasterKV<MisterObject, MisterObject, byte[], TValue, object, MisterObjectEnvironment<TValue, TValueObjectSource>>(
                 _settings.IndexSize,
                 new MisterObjectEnvironment<TValue, TValueObjectSource>(_valueSerializer),
                 new LogSettings { LogDevice = _mainLog },
@@ -707,14 +772,14 @@ namespace Marius.Mister
                         }
                     }
 
+                    if (hasPending)
+                    {
+                        _faster.CompletePending(true);
+                        hasPending = false;
+                    }
+
                     if (needRefresh)
                     {
-                        if (hasPending)
-                        {
-                            _faster.CompletePending(true);
-                            hasPending = false;
-                        }
-
                         _faster.Refresh();
                     }
                 }

@@ -126,6 +126,7 @@
     <Compile Include="MisterStreamSerializer.cs" />
     <Compile Include="MisterStreamStringSerializer.cs" />
     <Compile Include="MisterStringSerializer.cs" />
+    <Compile Include="MisterVoid.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
