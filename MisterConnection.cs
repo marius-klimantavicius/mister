@@ -157,6 +157,13 @@ namespace Marius.Mister
             }
         }
 
+        private class MisterForEachItem
+        {
+            public Action<TKey, TValue, bool, object> OnRecord;
+            public Action<object> OnCompleted;
+            public object State;
+        }
+
         private readonly DirectoryInfo _directory;
         private readonly IMisterSerializer<TKey, TKeyObjectSource> _keySerializer;
         private readonly IMisterSerializer<TValue, TValueObjectSource> _valueSerializer;
@@ -234,7 +241,7 @@ namespace Marius.Mister
             PerformCheckpoint();
         }
 
-        public Task FlushAsync(bool wait)
+        public Task FlushAsync(bool waitPending)
         {
             CheckDisposed();
 
@@ -243,7 +250,7 @@ namespace Marius.Mister
             {
                 Action = PerformFlush,
                 State = tsc,
-                WaitPending = wait,
+                WaitPending = waitPending,
             });
 
             lock (_workQueue)
@@ -370,6 +377,26 @@ namespace Marius.Mister
                 Monitor.Pulse(_workQueue);
 
             return tsc.Task;
+        }
+
+        public void ForEach(Action<TKey, TValue, bool, object> onRecord, Action<object> onCompleted = null, object state = default(object))
+        {
+            if (onRecord == null)
+                throw new ArgumentNullException(nameof(onRecord));
+
+            _workQueue.Enqueue(new MisterWorkItem()
+            {
+                Action = PerformForEach,
+                State = new MisterForEachItem()
+                {
+                    OnRecord = onRecord,
+                    OnCompleted = onCompleted,
+                    State = state,
+                },
+            });
+
+            lock (_workQueue)
+                Monitor.Pulse(_workQueue);
         }
 
         private unsafe bool PerformGet(ref MisterWorkItem workItem, long sequence)
@@ -551,6 +578,27 @@ namespace Marius.Mister
                 }
             }
 
+            return true;
+        }
+
+        private unsafe bool PerformForEach(ref MisterWorkItem workItem, long sequence)
+        {
+            var forEachItem = Unsafe.As<MisterForEachItem>(workItem.State);
+            var iterator = _faster.Log.Scan(_faster.Log.BeginAddress, _faster.Log.TailAddress);
+            while (iterator.GetNext(out var recordInfo))
+            {
+                ref var misterKey = ref iterator.GetKey();
+                ref var misterValue = ref iterator.GetValue();
+
+                var key = _keySerializer.Deserialize(ref misterKey.Data, misterKey.Length);
+                var value = _valueSerializer.Deserialize(ref misterValue.Data, misterValue.Length);
+
+                var isDeleted = recordInfo.Tombstone;
+                forEachItem.OnRecord(key, value, isDeleted, forEachItem.State);
+            }
+
+            if (forEachItem.OnCompleted != null)
+                forEachItem.OnCompleted(forEachItem.State);
             return true;
         }
 
