@@ -399,6 +399,21 @@ namespace Marius.Mister
                 Monitor.Pulse(_workQueue);
         }
 
+        public Task CompactAsync()
+        {
+            var tcs = new TaskCompletionSource<MisterVoid>();
+            _workQueue.Enqueue(new MisterWorkItem()
+            {
+                Action = PerformCompact,
+                State = tcs,
+            });
+
+            lock (_workQueue)
+                Monitor.Pulse(_workQueue);
+
+            return tcs.Task;
+        }
+
         private unsafe bool PerformGet(ref MisterWorkItem workItem, long sequence)
         {
             var status = default(Status);
@@ -489,7 +504,7 @@ namespace Marius.Mister
                     if (status == Status.ERROR)
                         tsc.SetException(new Exception());
                     else
-                        tsc.SetResult(default(MisterVoid));
+                        tsc.SetResult(MisterVoid.Value);
                 }
             }
             catch (Exception ex)
@@ -538,7 +553,7 @@ namespace Marius.Mister
                     if (status == Status.ERROR)
                         tsc.SetException(new Exception());
                     else
-                        tsc.SetResult(default(MisterVoid));
+                        tsc.SetResult(MisterVoid.Value);
                 }
             }
             catch (Exception ex)
@@ -566,7 +581,7 @@ namespace Marius.Mister
                 if (state != null)
                 {
                     var tsc = Unsafe.As<TaskCompletionSource<MisterVoid>>(state);
-                    tsc.SetResult(default(MisterVoid));
+                    tsc.SetResult(MisterVoid.Value);
                 }
             }
             catch (Exception ex)
@@ -600,6 +615,32 @@ namespace Marius.Mister
             if (forEachItem.OnCompleted != null)
                 forEachItem.OnCompleted(forEachItem.State);
             return true;
+        }
+
+        private bool PerformCompact(ref MisterWorkItem workItem, long sequence)
+        {
+            var state = workItem.State;
+            try
+            {
+                _faster.Log.Compact(_faster.Log.SafeReadOnlyAddress);
+                Interlocked.Increment(ref _checkpointVersion);
+
+                if (state != null)
+                {
+                    var tsc = Unsafe.As<TaskCompletionSource<MisterVoid>>(state);
+                    tsc.SetResult(MisterVoid.Value);
+                }
+            }
+            catch (Exception ex)
+            {
+                if (state != null)
+                {
+                    var tsc = (TaskCompletionSource<MisterVoid>)state;
+                    tsc.SetException(ex);
+                }
+            }
+
+            return false;
         }
 
         private void PerformCheckpoint()
@@ -668,10 +709,16 @@ namespace Marius.Mister
             };
 
             _mainLog = Devices.CreateLogDevice(Path.Combine(_directory.FullName, @"hlog.log"));
+            var logSettings = new LogSettings
+            {
+                LogDevice = _mainLog,
+            };
+            _settings.Apply(logSettings);
+
             _faster = new FasterKV<MisterObject, MisterObject, byte[], TValue, object, MisterObjectEnvironment<TValue, TValueObjectSource>>(
                 _settings.IndexSize,
                 new MisterObjectEnvironment<TValue, TValueObjectSource>(_valueSerializer),
-                new LogSettings { LogDevice = _mainLog },
+                logSettings,
                 new CheckpointSettings() { CheckpointDir = _directory.FullName, CheckPointType = CheckpointType.FoldOver },
                 serializerSettings: null,
                 comparer: new MisterObjectEqualityComparer(),
@@ -976,7 +1023,7 @@ namespace Marius.Mister
                         checkpointItem.ResetEvent.Set();
 
                     if (checkpointItem.TaskCompletionSource != null)
-                        checkpointItem.TaskCompletionSource.SetResult(default(MisterVoid));
+                        checkpointItem.TaskCompletionSource.SetResult(MisterVoid.Value);
                 }
             }
             catch (Exception ex)

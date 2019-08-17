@@ -182,18 +182,31 @@ namespace FASTER.core
         /// <param name="untilAddress"></param>
         public void Compact(long untilAddress)
         {
-            long originalUntilAddress = untilAddress;
+            var originalUntilAddress = untilAddress;
+
+            var variableLengthStructSettings = default(VariableLengthStructSettings<Key, Value>);
+            if (allocator is VariableLengthBlittableAllocator<Key, Value> varLen)
+            {
+                variableLengthStructSettings = new VariableLengthStructSettings<Key, Value>
+                {
+                    keyLength = varLen.KeyLength,
+                    valueLength = varLen.ValueLength,
+                };
+            }
 
             var tempKv = new FasterKV<Key, Value, Input, Output, Context, LogCompactFunctions>
-                (fht.IndexSize, new LogCompactFunctions(), new LogSettings(), comparer: fht.Comparer);
+                (fht.IndexSize, new LogCompactFunctions(allocator), new LogSettings(), comparer: fht.Comparer, variableLengthStructSettings: variableLengthStructSettings);
             tempKv.StartSession();
 
             int cnt = 0;
 
             using (var iter1 = fht.Log.Scan(fht.Log.BeginAddress, untilAddress))
             {
-                while (iter1.GetNext(out RecordInfo recordInfo, out Key key, out Value value))
+                while (iter1.GetNext(out RecordInfo recordInfo))
                 {
+                    ref var key = ref iter1.GetKey();
+                    ref var value = ref iter1.GetValue();
+
                     if (recordInfo.Tombstone)
                         tempKv.Delete(ref key, default(Context), 0);
                     else
@@ -216,8 +229,11 @@ namespace FASTER.core
             cnt = 0;
             using (var iter3 = tempKv.Log.Scan(tempKv.Log.BeginAddress, tempKv.Log.TailAddress))
             {
-                while (iter3.GetNext(out RecordInfo recordInfo, out Key key, out Value value))
+                while (iter3.GetNext(out RecordInfo recordInfo))
                 {
+                    ref var key = ref iter3.GetKey();
+                    ref var value = ref iter3.GetValue();
+
                     if (!recordInfo.Tombstone)
                     {
                         if (fht.ContainsKeyInMemory(ref key, scanUntil) == Status.NOTFOUND)
@@ -249,8 +265,11 @@ namespace FASTER.core
                 int cnt = 0;
                 using (var iter2 = fht.Log.Scan(untilAddress, scanUntil))
                 {
-                    while (iter2.GetNext(out RecordInfo recordInfo, out Key key, out Value value))
+                    while (iter2.GetNext(out RecordInfo recordInfo))
                     {
+                        ref var key = ref iter2.GetKey();
+                        ref var value = ref iter2.GetValue();
+
                         tempKv.Delete(ref key, default(Context), 0);
 
                         if (++cnt % 1000 == 0)
@@ -266,16 +285,23 @@ namespace FASTER.core
 
         private class LogCompactFunctions : IFunctions<Key, Value, Input, Output, Context>
         {
+            private AllocatorBase<Key, Value> allocator;
+
+            public LogCompactFunctions(AllocatorBase<Key, Value> allocator)
+            {
+                this.allocator = allocator;
+            }
+
             public void CheckpointCompletionCallback(Guid sessionId, long serialNum) { }
             public void ConcurrentReader(ref Key key, ref Input input, ref Value value, ref Output dst) { }
-            public void ConcurrentWriter(ref Key key, ref Value src, ref Value dst) { dst = src; }
+            public void ConcurrentWriter(ref Key key, ref Value src, ref Value dst) { allocator.ShallowCopy(ref src, ref dst); }
             public void CopyUpdater(ref Key key, ref Input input, ref Value oldValue, ref Value newValue) { }
             public void InitialUpdater(ref Key key, ref Input input, ref Value value) { }
             public void InPlaceUpdater(ref Key key, ref Input input, ref Value value) { }
             public void ReadCompletionCallback(ref Key key, ref Input input, ref Output output, Context ctx, Status status) { }
             public void RMWCompletionCallback(ref Key key, ref Input input, Context ctx, Status status) { }
             public void SingleReader(ref Key key, ref Input input, ref Value value, ref Output dst) { }
-            public void SingleWriter(ref Key key, ref Value src, ref Value dst) { dst = src; }
+            public void SingleWriter(ref Key key, ref Value src, ref Value dst) { allocator.ShallowCopy(ref src, ref dst); }
             public void UpsertCompletionCallback(ref Key key, ref Value value, Context ctx) { }
             public void DeleteCompletionCallback(ref Key key, Context ctx) { }
         }

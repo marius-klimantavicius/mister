@@ -14,7 +14,13 @@ namespace Marius.Mister
         static void Main(string[] args)
         {
             var serializer = new MisterStringSerializer();
-            var connection = MisterConnection.Create(new DirectoryInfo(@"C:\Mister"), serializer, serializer);
+            var settings = new MisterConnectionSettings()
+            {
+                PageSizeBits = 20,
+                SegmentSizeBits = 21,
+            };
+
+            var connection = MisterConnection.Create(new DirectoryInfo(@"C:\Mister"), serializer, serializer, settings: settings);
 
             var sw = Stopwatch.StartNew();
             while (true)
@@ -54,7 +60,7 @@ namespace Marius.Mister
                     connection.ForEach((key, value, isDeleted, _) =>
                     {
                         Console.WriteLine($"{(isDeleted ? "[dead] " : "")}{key} - {value}");
-                    }, 
+                    },
                     (sem) => ((SemaphoreSlim)sem).Release(), semaphore);
                     semaphore.Wait();
                 }
@@ -76,6 +82,10 @@ namespace Marius.Mister
 
                     Task.WaitAll(tasks);
                     Console.WriteLine(sw.Elapsed);
+                }
+                else if (parts[0] == "compact")
+                {
+                    connection.CompactAsync().GetAwaiter().GetResult();
                 }
             }
             connection.Close();

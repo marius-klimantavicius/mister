@@ -28,10 +28,11 @@ namespace FASTER.core
         private long[] pointers;
         private readonly GCHandle ptrHandle;
         private readonly long* nativePointers;
-        private readonly IVariableLengthStruct<Key> KeyLength;
-        private readonly IVariableLengthStruct<Value> ValueLength;
         private readonly bool fixedSizeKey;
         private readonly bool fixedSizeValue;
+
+        internal readonly IVariableLengthStruct<Key> KeyLength;
+        internal readonly IVariableLengthStruct<Value> ValueLength;
 
         public VariableLengthBlittableAllocator(LogSettings settings, VariableLengthStructSettings<Key, Value> vlSettings, IFasterEqualityComparer<Key> comparer, Action<long, long> evictCallback = null, LightEpoch epoch = null)
             : base(settings, comparer, evictCallback, epoch)
