@@ -15,12 +15,45 @@ using System.Diagnostics;
 
 namespace FASTER.core
 {
-    public unsafe sealed class VariableLengthBlittableAllocator<Key, Value> : AllocatorBase<Key, Value>
+    internal interface IVariableLengthBlittableAllocator<Key, Value>
         where Key : new()
         where Value : new()
     {
+        IVariableLengthStruct<Key> KeyVariableLength { get; }
+        IVariableLengthStruct<Value> ValueVariableLength { get; }
+    }
+
+    internal static class VariableLengthBlittableAllocator<Key, Value>
+        where Key : new()
+        where Value : new()
+    {
+        public static AllocatorBase<Key, Value> Create(LogSettings settings, VariableLengthStructSettings<Key, Value> vlSettings, IFasterEqualityComparer<Key> comparer, Action<long, long> evictCallback = null, LightEpoch epoch = null)
+        {
+            if (vlSettings.UseCapacity)
+                return Create<VariableLengthBlittableAllocatorStrategyEnabled>(settings, vlSettings, comparer, evictCallback, epoch);
+            return Create<VariableLengthBlittableAllocatorStrategyDisabled>(settings, vlSettings, comparer, evictCallback, epoch);
+        }
+
+        public static AllocatorBase<Key, Value> Create<CapacityStrategy>(LogSettings settings, VariableLengthStructSettings<Key, Value> vlSettings, IFasterEqualityComparer<Key> comparer, Action<long, long> evictCallback = null, LightEpoch epoch = null)
+            where CapacityStrategy : struct, IVariableLengthBlittableAllocatorStrategy
+        {
+            if (vlSettings.UseAlignment)
+                return new VariableLengthBlittableAllocator<Key, Value, CapacityStrategy, VariableLengthBlittableAllocatorStrategyEnabled>(settings, vlSettings, comparer, evictCallback, epoch);
+            return new VariableLengthBlittableAllocator<Key, Value, CapacityStrategy, VariableLengthBlittableAllocatorStrategyDisabled>(settings, vlSettings, comparer, evictCallback, epoch);
+        }
+    }
+
+    public unsafe sealed class VariableLengthBlittableAllocator<Key, Value, CapacityStrategy, AlignmentStrategy> : AllocatorBase<Key, Value>, IVariableLengthBlittableAllocator<Key, Value>
+        where Key : new()
+        where Value : new()
+        where CapacityStrategy : struct, IVariableLengthBlittableAllocatorStrategy
+        where AlignmentStrategy : struct, IVariableLengthBlittableAllocatorStrategy
+    {
         public const int kRecordAlignment = 8; // RecordInfo has a long field, so it should be aligned to 8-bytes
         public const int kCapacityLength = sizeof(int);
+
+        private static readonly CapacityStrategy UseCapacity = default(CapacityStrategy);
+        private static readonly AlignmentStrategy UseAlignment = default(AlignmentStrategy);
 
         // Circular buffer definition
         private byte[][] values;
@@ -33,6 +66,9 @@ namespace FASTER.core
 
         internal readonly IVariableLengthStruct<Key> KeyLength;
         internal readonly IVariableLengthStruct<Value> ValueLength;
+
+        IVariableLengthStruct<Key> IVariableLengthBlittableAllocator<Key, Value>.KeyVariableLength => KeyLength;
+        IVariableLengthStruct<Value> IVariableLengthBlittableAllocator<Key, Value>.ValueVariableLength => ValueLength;
 
         public VariableLengthBlittableAllocator(LogSettings settings, VariableLengthStructSettings<Key, Value> vlSettings, IFasterEqualityComparer<Key> comparer, Action<long, long> evictCallback = null, LightEpoch epoch = null)
             : base(settings, comparer, evictCallback, epoch)
@@ -85,18 +121,35 @@ namespace FASTER.core
             ref var recordInfo = ref GetInfo(physicalAddress);
             RecordInfo.WriteInfo(ref recordInfo, checkpointVersion, final, tombstone, invalidBit, previousAddress);
 
-            ref var capacity = ref GetCapacity(physicalAddress);
-            capacity = recordSize;
+            if (UseCapacity.IsEnabled)
+            {
+                ref var capacity = ref GetCapacity(physicalAddress);
+                capacity = recordSize;
+            }
         }
 
         public override ref Key GetKey(long physicalAddress)
         {
-            return ref Unsafe.AsRef<Key>((byte*)physicalAddress + RecordInfo.GetLength() + kCapacityLength);
+            if (UseCapacity.IsEnabled)
+            {
+                return ref Unsafe.AsRef<Key>((byte*)physicalAddress + RecordInfo.GetLength() + kCapacityLength);
+            }
+            else
+            {
+                return ref Unsafe.AsRef<Key>((byte*)physicalAddress + RecordInfo.GetLength());
+            }
         }
 
         public override ref Value GetValue(long physicalAddress)
         {
-            return ref Unsafe.AsRef<Value>((byte*)physicalAddress + RecordInfo.GetLength() + kCapacityLength + KeySize(physicalAddress));
+            if (UseCapacity.IsEnabled)
+            {
+                return ref Unsafe.AsRef<Value>((byte*)physicalAddress + RecordInfo.GetLength() + kCapacityLength + KeySize(physicalAddress));
+            }
+            else
+            {
+                return ref Unsafe.AsRef<Value>((byte*)physicalAddress + RecordInfo.GetLength() + KeySize(physicalAddress));
+            }
         }
 
         private int KeySize(long physicalAddress)
@@ -111,14 +164,27 @@ namespace FASTER.core
 
         public override int GetRecordSize(long physicalAddress)
         {
-            ref var capacity = ref GetCapacity(physicalAddress);
-            if (capacity == 0)
+            if (UseCapacity.IsEnabled)
+            {
+                ref var capacity = ref GetCapacity(physicalAddress);
+                if (capacity == 0)
+                {
+                    var size = RecordInfo.GetLength() + kCapacityLength + KeySize(physicalAddress) + ValueSize(physicalAddress);
+                    if (UseAlignment.IsEnabled)
+                        size = (size + kRecordAlignment - 1) & (~(kRecordAlignment - 1));
+
+                    return size;
+                }
+                return capacity;
+            }
+            else
             {
                 var size = RecordInfo.GetLength() + kCapacityLength + KeySize(physicalAddress) + ValueSize(physicalAddress);
-                size = (size + kRecordAlignment - 1) & (~(kRecordAlignment - 1));
+                if (UseAlignment.IsEnabled)
+                    size = (size + kRecordAlignment - 1) & (~(kRecordAlignment - 1));
+
                 return size;
             }
-            return capacity;
         }
 
         public override int GetRequiredRecordSize(long physicalAddress, int availableBytes)
@@ -130,52 +196,96 @@ namespace FASTER.core
                 return reqBytes;
             }
 
-            // We need at least [record size] + [capacity] + [actual key size] + [average value size]
-            reqBytes = RecordInfo.GetLength() + kCapacityLength + KeySize(physicalAddress) + ValueLength.GetAverageLength();
-            if (availableBytes < reqBytes)
+            if (UseCapacity.IsEnabled)
             {
-                return reqBytes;
+                // We need at least [record size] + [capacity] + [actual key size] + [average value size]
+                reqBytes = RecordInfo.GetLength() + kCapacityLength + KeySize(physicalAddress) + ValueLength.GetAverageLength();
+                if (availableBytes < reqBytes)
+                {
+                    return reqBytes;
+                }
+
+                // We need at least [record size] + [capacity] + [actual key size] + [actual value size]
+                reqBytes = RecordInfo.GetLength() + kCapacityLength + KeySize(physicalAddress) + ValueSize(physicalAddress);
+            }
+            else
+            {
+                // We need at least [record size] + [actual key size] + [average value size]
+                reqBytes = RecordInfo.GetLength() + KeySize(physicalAddress) + ValueLength.GetAverageLength();
+                if (availableBytes < reqBytes)
+                {
+                    return reqBytes;
+                }
+
+                // We need at least [record size] + [actual key size] + [actual value size]
+                reqBytes = RecordInfo.GetLength() + KeySize(physicalAddress) + ValueSize(physicalAddress);
             }
 
-            // We need at least [record size] + [capacity] + [actual key size] + [actual value size]
-            reqBytes = RecordInfo.GetLength() + kCapacityLength + KeySize(physicalAddress) + ValueSize(physicalAddress);
+            if (UseAlignment.IsEnabled)
+                reqBytes = (reqBytes + kRecordAlignment - 1) & (~(kRecordAlignment - 1));
+
             return reqBytes;
         }
 
         public override int GetAverageRecordSize()
         {
-            return RecordInfo.GetLength() +
-                kCapacityLength +
-                kRecordAlignment +
+            var baseLength = RecordInfo.GetLength() +
                 KeyLength.GetAverageLength() +
                 ValueLength.GetAverageLength();
+
+            if (UseCapacity.IsEnabled)
+                baseLength += kCapacityLength;
+
+            if (UseAlignment.IsEnabled)
+                baseLength += kRecordAlignment;
+
+            return baseLength;
         }
 
         public override int GetInitialRecordSize<Input>(ref Key key, ref Input input)
         {
             var actualSize = RecordInfo.GetLength() +
-                kCapacityLength +
                 KeyLength.GetLength(ref key) +
                 ValueLength.GetInitialLength(ref input);
 
-            return (actualSize + kRecordAlignment - 1) & (~(kRecordAlignment - 1));
+            if (UseCapacity.IsEnabled)
+                actualSize += kCapacityLength;
+
+            if (UseAlignment.IsEnabled)
+            {
+                return (actualSize + kRecordAlignment - 1) & (~(kRecordAlignment - 1));
+            }
+
+            return actualSize;
         }
 
         public override int GetRecordSize(ref Key key, ref Value value)
         {
             var actualSize = RecordInfo.GetLength() +
-                kCapacityLength +
                 KeyLength.GetLength(ref key) +
                 ValueLength.GetLength(ref value);
 
-            return (actualSize + kRecordAlignment - 1) & (~(kRecordAlignment - 1));
+            if (UseCapacity.IsEnabled)
+                actualSize += kCapacityLength;
+
+            if (UseAlignment.IsEnabled)
+                return (actualSize + kRecordAlignment - 1) & (~(kRecordAlignment - 1));
+
+            return actualSize;
         }
 
         public override bool CanWriteInPlace(ref Key key, ref Value value, long physicalAddress)
         {
-            var exitingSize = GetRecordSize(physicalAddress);
-            var neededSize = GetRecordSize(ref key, ref value);
-            return exitingSize >= neededSize;
+            if (UseCapacity.IsEnabled)
+            {
+                return false;
+            }
+            else
+            {
+                var exitingSize = GetRecordSize(physicalAddress);
+                var neededSize = GetRecordSize(ref key, ref value);
+                return exitingSize >= neededSize;
+            }
         }
 
         public override void ShallowCopy(ref Key src, ref Key dst)
@@ -390,7 +500,6 @@ namespace FASTER.core
             return true;
         }
 
-
         public override ref Key GetContextRecordKey(ref AsyncIOContext<Key, Value> ctx)
         {
             return ref GetKey((long)ctx.record.GetValidPointer());
@@ -451,9 +560,8 @@ namespace FASTER.core
         /// <returns></returns>
         public override IFasterScanIterator<Key, Value> Scan(long beginAddress, long endAddress, ScanBufferingMode scanBufferingMode)
         {
-            return new VariableLengthBlittableScanIterator<Key, Value>(this, beginAddress, endAddress, scanBufferingMode);
+            return new VariableLengthBlittableScanIterator<Key, Value, CapacityStrategy, AlignmentStrategy>(this, beginAddress, endAddress, scanBufferingMode);
         }
-
 
         /// <summary>
         /// Read pages from specified device

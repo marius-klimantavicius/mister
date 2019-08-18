@@ -110,6 +110,18 @@ namespace FASTER.core
         /// Value length
         /// </summary>
         public IVariableLengthStruct<Value> valueLength;
+
+        /// <summary>
+        /// Add capacity field when writing records.
+        /// This adds additional space requirements but allows to do (sometimes) 
+        /// in place writes/deletes
+        /// </summary>
+        public bool UseCapacity = true;
+
+        /// <summary>
+        /// Align records to 8-bytes.
+        /// </summary>
+        public bool UseAlignment = true;
     }
 
 
@@ -179,5 +191,20 @@ namespace FASTER.core
         /// Fraction of log used for second chance copy to tail
         /// </summary>
         public double SecondChanceFraction = 0.9;
+    }
+
+    public interface IVariableLengthBlittableAllocatorStrategy
+    {
+        bool IsEnabled { get; }
+    }
+
+    public struct VariableLengthBlittableAllocatorStrategyEnabled : IVariableLengthBlittableAllocatorStrategy
+    {
+        public bool IsEnabled => true;
+    }
+
+    public struct VariableLengthBlittableAllocatorStrategyDisabled : IVariableLengthBlittableAllocatorStrategy
+    {
+        public bool IsEnabled => false;
     }
 }

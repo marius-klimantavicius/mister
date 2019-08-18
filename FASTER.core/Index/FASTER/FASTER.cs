@@ -124,12 +124,12 @@ namespace FASTER.core
             {
                 if (variableLengthStructSettings != null)
                 {
-                    hlog = new VariableLengthBlittableAllocator<Key, Value>
+                    hlog = VariableLengthBlittableAllocator<Key, Value>.Create
                         (logSettings, variableLengthStructSettings, this.comparer, null, epoch);
                     Log = new LogAccessor<Key, Value, Input, Output, Context>(this, hlog);
                     if (UseReadCache)
                     {
-                        readcache = new VariableLengthBlittableAllocator<Key, Value>(
+                        readcache = VariableLengthBlittableAllocator<Key, Value>.Create(
                             new LogSettings
                             {
                                 PageSizeBits = logSettings.ReadCacheSettings.PageSizeBits,

@@ -185,12 +185,12 @@ namespace FASTER.core
             var originalUntilAddress = untilAddress;
 
             var variableLengthStructSettings = default(VariableLengthStructSettings<Key, Value>);
-            if (allocator is VariableLengthBlittableAllocator<Key, Value> varLen)
+            if (allocator is IVariableLengthBlittableAllocator<Key, Value> varLen)
             {
                 variableLengthStructSettings = new VariableLengthStructSettings<Key, Value>
                 {
-                    keyLength = varLen.KeyLength,
-                    valueLength = varLen.ValueLength,
+                    keyLength = varLen.KeyVariableLength,
+                    valueLength = varLen.ValueVariableLength,
                 };
             }
 

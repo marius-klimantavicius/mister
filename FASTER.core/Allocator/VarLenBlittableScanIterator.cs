@@ -10,12 +10,14 @@ namespace FASTER.core
     /// <summary>
     /// Scan iterator for hybrid log
     /// </summary>
-    public class VariableLengthBlittableScanIterator<Key, Value> : IFasterScanIterator<Key, Value>
+    public class VariableLengthBlittableScanIterator<Key, Value, VariableLengthBlittableAllocatorStrategy, VariableLengthBlittableAllocatorAlignmentStrategy> : IFasterScanIterator<Key, Value>
         where Key : new()
         where Value : new()
+        where VariableLengthBlittableAllocatorStrategy: struct, IVariableLengthBlittableAllocatorStrategy
+        where VariableLengthBlittableAllocatorAlignmentStrategy : struct, IVariableLengthBlittableAllocatorStrategy
     {
         private readonly int frameSize;
-        private readonly VariableLengthBlittableAllocator<Key, Value> hlog;
+        private readonly VariableLengthBlittableAllocator<Key, Value, VariableLengthBlittableAllocatorStrategy, VariableLengthBlittableAllocatorAlignmentStrategy> hlog;
         private readonly long beginAddress, endAddress;
         private readonly BlittableFrame frame;
         private readonly CountdownEvent[] loaded;
@@ -36,7 +38,7 @@ namespace FASTER.core
         /// <param name="beginAddress"></param>
         /// <param name="endAddress"></param>
         /// <param name="scanBufferingMode"></param>
-        public unsafe VariableLengthBlittableScanIterator(VariableLengthBlittableAllocator<Key, Value> hlog, long beginAddress, long endAddress, ScanBufferingMode scanBufferingMode)
+        public unsafe VariableLengthBlittableScanIterator(VariableLengthBlittableAllocator<Key, Value, VariableLengthBlittableAllocatorStrategy, VariableLengthBlittableAllocatorAlignmentStrategy> hlog, long beginAddress, long endAddress, ScanBufferingMode scanBufferingMode)
         {
             this.hlog = hlog;
 
