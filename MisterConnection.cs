@@ -703,11 +703,10 @@ namespace Marius.Mister
                 _mainLog.Close();
 
             var environment = new MisterObjectEnvironment<TValue, TValueObjectSource>(_valueSerializer);
-            var variableLengthStructSettings = new VariableLengthStructSettings<MisterObject, MisterObject, byte[]>()
+            var variableLengthStructSettings = new VariableLengthStructSettings<MisterObject, MisterObject>()
             {
                 keyLength = new MisterObjectVariableLengthStruct(),
                 valueLength = new MisterObjectVariableLengthStruct(),
-                functions = environment,
             };
 
             _mainLog = Devices.CreateLogDevice(Path.Combine(_directory.FullName, @"hlog.log"));

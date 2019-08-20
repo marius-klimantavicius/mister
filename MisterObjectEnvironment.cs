@@ -6,7 +6,7 @@ using FASTER.core;
 
 namespace Marius.Mister
 {
-    public unsafe class MisterObjectEnvironment<TValue, TValueObjectSource> : IFunctions<MisterObject, MisterObject, byte[], TValue, object>, IVariableLengthFunctions<MisterObject, MisterObject, byte[]>
+    public unsafe class MisterObjectEnvironment<TValue, TValueObjectSource> : IFunctions<MisterObject, MisterObject, byte[], TValue, object>
         where TValueObjectSource : struct, IMisterObjectSource
     {
         private readonly IMisterSerializer<TValue, TValueObjectSource> _serializer;
@@ -102,16 +102,6 @@ namespace Marius.Mister
 
             var tcs = Unsafe.As<TaskCompletionSource<MisterVoid>>(ctx);
             tcs.TrySetResult(MisterVoid.Value);
-        }
-
-        void IFunctions<MisterObject, MisterObject, byte[], TValue, object>.InPlaceUpdater(ref MisterObject key, ref byte[] input, ref MisterObject value)
-        {
-            throw new NotImplementedException();
-        }
-
-        void IFunctions<MisterObject, MisterObject, byte[], TValue, object>.ConcurrentWriter(ref MisterObject key, ref MisterObject src, ref MisterObject dst)
-        {
-            throw new NotImplementedException();
         }
     }
 }
