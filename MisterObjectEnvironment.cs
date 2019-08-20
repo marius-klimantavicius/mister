@@ -6,7 +6,7 @@ using FASTER.core;
 
 namespace Marius.Mister
 {
-    public unsafe class MisterObjectEnvironment<TValue, TValueObjectSource> : IFunctions<MisterObject, MisterObject, byte[], TValue, object>
+    public unsafe class MisterObjectEnvironment<TValue, TValueObjectSource> : IFunctions<MisterObject, MisterObject, byte[], TValue, object>, IVariableLengthFunctions<MisterObject, MisterObject, byte[]>
         where TValueObjectSource : struct, IMisterObjectSource
     {
         private readonly IMisterSerializer<TValue, TValueObjectSource> _serializer;
@@ -36,14 +36,19 @@ namespace Marius.Mister
             }
         }
 
-        public void ConcurrentWriter(ref MisterObject key, ref MisterObject src, ref MisterObject dst)
+        public bool ConcurrentWriter(ref MisterObject key, ref MisterObject src, ref MisterObject dst)
         {
+            if (dst.Length != src.Length)
+                return false;
+
             var length = src.Length;
             dst.Length = length;
             fixed (byte* source = &src.Data, destination = &dst.Data)
             {
                 Buffer.MemoryCopy(source, destination, length, length);
             }
+
+            return true;
         }
 
         public void CopyUpdater(ref MisterObject key, ref byte[] input, ref MisterObject oldValue, ref MisterObject newValue)
@@ -56,7 +61,7 @@ namespace Marius.Mister
             throw new NotImplementedException();
         }
 
-        public void InPlaceUpdater(ref MisterObject key, ref byte[] input, ref MisterObject value)
+        public bool InPlaceUpdater(ref MisterObject key, ref byte[] input, ref MisterObject value)
         {
             throw new NotImplementedException();
         }
@@ -97,6 +102,16 @@ namespace Marius.Mister
 
             var tcs = Unsafe.As<TaskCompletionSource<MisterVoid>>(ctx);
             tcs.TrySetResult(MisterVoid.Value);
+        }
+
+        void IFunctions<MisterObject, MisterObject, byte[], TValue, object>.InPlaceUpdater(ref MisterObject key, ref byte[] input, ref MisterObject value)
+        {
+            throw new NotImplementedException();
+        }
+
+        void IFunctions<MisterObject, MisterObject, byte[], TValue, object>.ConcurrentWriter(ref MisterObject key, ref MisterObject src, ref MisterObject dst)
+        {
+            throw new NotImplementedException();
         }
     }
 }

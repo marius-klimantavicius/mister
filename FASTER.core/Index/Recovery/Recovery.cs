@@ -89,7 +89,7 @@ namespace FASTER.core
             recoveredHLCInfo.info.DebugPrint();
 
             // Check if the two checkpoints are compatible for recovery
-            if (!IsCompatible(recoveredICInfo.info, recoveredHLCInfo.info))
+            if(!IsCompatible(recoveredICInfo.info, recoveredHLCInfo.info))
             {
                 throw new Exception("Cannot recover from (" + indexToken.ToString() + "," + hybridLogToken.ToString() + ") checkpoint pair!\n");
             }
@@ -118,19 +118,25 @@ namespace FASTER.core
             {
                 RecoverHybridLogFromSnapshotFile(recoveredICInfo.info, recoveredHLCInfo.info);
             }
-
+            
 
             // Read appropriate hybrid log pages into memory
-            RestoreHybridLog(recoveredHLCInfo.info.finalLogicalAddress, recoveredHLCInfo.info.headAddress);
+            RestoreHybridLog(recoveredHLCInfo.info.finalLogicalAddress, recoveredHLCInfo.info.headAddress, recoveredHLCInfo.info.beginAddress);
 
             // Recover session information
             _recoveredSessions = recoveredHLCInfo.info.continueTokens;
         }
 
-        private void RestoreHybridLog(long untilAddress, long headAddress)
+        private void RestoreHybridLog(long untilAddress, long headAddress, long beginAddress)
         {
-            // Special case: we do not load any records into memory
-            if (headAddress == untilAddress && (headAddress == Constants.kFirstValidAddress || hlog.GetOffsetInPage(headAddress) == 0))
+            Debug.Assert(beginAddress <= headAddress);
+            Debug.Assert(headAddress <= untilAddress);
+
+            // Special cases: we do not load any records into memory
+            if (
+                (beginAddress == untilAddress) || // Empty log
+                ((headAddress == untilAddress) && (hlog.GetOffsetInPage(headAddress) == 0)) // Empty in-memory page
+                )
             {
                 hlog.AllocatePage(hlog.GetPageIndexForAddress(headAddress));
             }
@@ -171,7 +177,7 @@ namespace FASTER.core
                 }
             }
 
-            hlog.RecoveryReset(untilAddress, headAddress);
+            hlog.RecoveryReset(untilAddress, headAddress, beginAddress);
         }
 
 
@@ -197,7 +203,7 @@ namespace FASTER.core
 
             // Issue request to read pages as much as possible
             hlog.AsyncReadPagesFromDevice(startPage, numPagesToReadFirst, untilAddress, AsyncReadPagesCallbackForRecovery, recoveryStatus);
-
+           
             for (long page = startPage; page < endPage; page++)
             {
                 // Ensure page has been read into memory
@@ -221,7 +227,7 @@ namespace FASTER.core
                 {
                     pageUntilAddress = hlog.GetOffsetInPage(untilAddress);
                 }
-
+                
                 var physicalAddress = hlog.GetPhysicalAddress(startLogicalAddress);
                 RecoverFromPage(fromAddress, pageFromAddress, pageUntilAddress,
                                 startLogicalAddress, physicalAddress, recoveryInfo.version);

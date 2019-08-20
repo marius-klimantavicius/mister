@@ -95,11 +95,69 @@ namespace FASTER.core
     }
 
     /// <summary>
+    /// <see cref="IVariableLengthFunctions{Key, Value, Input}" /> implementation that always support in place editing
+    /// </summary>
+    /// <typeparam name="Key"></typeparam>
+    /// <typeparam name="Value"></typeparam>
+    /// <typeparam name="Input"></typeparam>
+    /// <typeparam name="Output"></typeparam>
+    /// <typeparam name="Context"></typeparam>
+    /// <typeparam name="Functions"></typeparam>
+    public class FixedLengthFunctions<Key, Value, Input, Output, Context, Functions> : IVariableLengthFunctions<Key, Value, Input>
+        where Key : new()
+        where Value : new()
+        where Functions : IFunctions<Key, Value, Input, Output, Context>
+    {
+        private Functions functions;
+
+        /// <summary>
+        /// Creates instance of <see cref="FixedLengthFunctions{Key, Value, Input, Output, Context, Functions}"/>
+        /// </summary>
+        /// <param name="functions"></param>
+        public FixedLengthFunctions(Functions functions)
+        {
+            this.functions = functions;
+        }
+
+        /// <summary>
+        /// Concurrent writer
+        /// </summary>
+        /// <param name="key"></param>
+        /// <param name="src"></param>
+        /// <param name="dst"></param>
+        /// <returns>
+        /// <code>true</code> - to always allow in place editing
+        /// </returns>
+        public bool ConcurrentWriter(ref Key key, ref Value src, ref Value dst)
+        {
+            functions.ConcurrentWriter(ref key, ref src, ref dst);
+            return true;
+        }
+
+        /// <summary>
+        /// In-place update for RMW
+        /// </summary>
+        /// <param name="key"></param>
+        /// <param name="input"></param>
+        /// <param name="value"></param>
+        /// <returns>
+        /// <code>true</code> - to always allow in place editing
+        /// </returns>
+        public bool InPlaceUpdater(ref Key key, ref Input input, ref Value value)
+        {
+            functions.InPlaceUpdater(ref key, ref input, ref value);
+            return true;
+        }
+    }
+
+
+    /// <summary>
     /// Settings for variable length keys and values
     /// </summary>
     /// <typeparam name="Key"></typeparam>
     /// <typeparam name="Value"></typeparam>
-    public class VariableLengthStructSettings<Key, Value>
+    /// <typeparam name="Input"></typeparam>
+    public class VariableLengthStructSettings<Key, Value, Input>
     {
         /// <summary>
         /// Key length
@@ -112,16 +170,9 @@ namespace FASTER.core
         public IVariableLengthStruct<Value> valueLength;
 
         /// <summary>
-        /// Add capacity field when writing records.
-        /// This adds additional space requirements but allows to do (sometimes) 
-        /// in place writes/deletes
+        /// Variable length functions
         /// </summary>
-        public bool UseCapacity = true;
-
-        /// <summary>
-        /// Align records to 8-bytes.
-        /// </summary>
-        public bool UseAlignment = true;
+        public IVariableLengthFunctions<Key, Value, Input> functions;
     }
 
 
@@ -191,20 +242,5 @@ namespace FASTER.core
         /// Fraction of log used for second chance copy to tail
         /// </summary>
         public double SecondChanceFraction = 0.9;
-    }
-
-    public interface IVariableLengthBlittableAllocatorStrategy
-    {
-        bool IsEnabled { get; }
-    }
-
-    public struct VariableLengthBlittableAllocatorStrategyEnabled : IVariableLengthBlittableAllocatorStrategy
-    {
-        public bool IsEnabled => true;
-    }
-
-    public struct VariableLengthBlittableAllocatorStrategyDisabled : IVariableLengthBlittableAllocatorStrategy
-    {
-        public bool IsEnabled => false;
     }
 }
