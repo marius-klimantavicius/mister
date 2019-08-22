@@ -3,7 +3,7 @@ using System.Buffers;
 
 namespace Marius.Mister
 {
-    public unsafe class MisterStringSerializer : IMisterSerializer<string, MisterArrayPoolObjectSource>
+    public unsafe class MisterObjectStringSerializer : IMisterObjectSerializer<string, MisterArrayPoolObjectSource>
     {
         public MisterArrayPoolObjectSource Serialize(string value)
         {

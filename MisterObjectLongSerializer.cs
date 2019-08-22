@@ -4,7 +4,7 @@ using System.Runtime.CompilerServices;
 
 namespace Marius.Mister
 {
-    public unsafe class MisterLongSerializer : IMisterSerializer<long, MisterArrayPoolObjectSource>
+    public unsafe class MisterObjectLongSerializer : IMisterObjectSerializer<long, MisterArrayPoolObjectSource>
     {
         public MisterArrayPoolObjectSource Serialize(long value)
         {

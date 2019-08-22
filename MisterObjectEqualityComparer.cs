@@ -4,6 +4,8 @@ namespace Marius.Mister
 {
     public unsafe class MisterObjectEqualityComparer : IFasterEqualityComparer<MisterObject>
     {
+        public static MisterObjectEqualityComparer Instance = new MisterObjectEqualityComparer();
+
         public bool Equals(ref MisterObject k1, ref MisterObject k2)
         {
             if (k1.Length != k2.Length)

@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 
 namespace Marius.Mister
 {
-    public struct MisterStreamObjectSource : IMisterObjectSource
+    public struct MisterStreamObjectSource : IMisterAtomSource<MisterObject>
     {
         private MemoryStream _stream;
 
@@ -17,7 +17,7 @@ namespace Marius.Mister
             _stream.Dispose();
         }
 
-        public ref MisterObject GetObject()
+        public ref MisterObject GetAtom()
         {
             var buffer = _stream.GetBuffer();
 

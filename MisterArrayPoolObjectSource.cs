@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 
 namespace Marius.Mister
 {
-    public struct MisterArrayPoolObjectSource : IMisterObjectSource
+    public struct MisterArrayPoolObjectSource : IMisterAtomSource<MisterObject>
     {
         private readonly byte[] _buffer;
         private readonly int _length;
@@ -19,7 +19,7 @@ namespace Marius.Mister
             ArrayPool<byte>.Shared.Return(_buffer);
         }
 
-        public ref MisterObject GetObject()
+        public ref MisterObject GetAtom()
         {
             ref var value = ref Unsafe.As<byte, MisterObject>(ref _buffer[0]);
             value.Length = _length;

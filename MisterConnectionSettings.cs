@@ -17,7 +17,6 @@ namespace Marius.Mister
 
         public long IndexSize { get; set; }
 
-
         /// <summary>
         /// Size of a segment (group of pages), in bits
         /// </summary>

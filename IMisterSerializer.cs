@@ -1,9 +1,9 @@
 ﻿namespace Marius.Mister
 {
-    public interface IMisterSerializer<T, TObjectSource>
-        where TObjectSource: struct, IMisterObjectSource
+    public interface IMisterSerializer<T, TAtom, TAtomSource>
+        where TAtomSource : struct, IMisterAtomSource<TAtom>
     {
-        TObjectSource Serialize(T value);
-        T Deserialize(ref MisterObject value);
+        TAtomSource Serialize(T value);
+        T Deserialize(ref TAtom value);
     }
 }

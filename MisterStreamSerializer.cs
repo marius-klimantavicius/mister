@@ -2,7 +2,7 @@
 
 namespace Marius.Mister
 {
-    public class MisterStreamSerializer<T> : IMisterSerializer<T, MisterStreamObjectSource>
+    public class MisterStreamSerializer<T> : IMisterObjectSerializer<T, MisterStreamObjectSource>
     {
         private readonly IMisterStreamSerializer<T> _streamSerializer;
         private readonly IMisterStreamManager _streamManager;

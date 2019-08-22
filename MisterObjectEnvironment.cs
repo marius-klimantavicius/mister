@@ -6,12 +6,12 @@ using FASTER.core;
 
 namespace Marius.Mister
 {
-    public unsafe class MisterObjectEnvironment<TValue, TValueObjectSource> : IFunctions<MisterObject, MisterObject, byte[], TValue, object>
-        where TValueObjectSource : struct, IMisterObjectSource
+    public unsafe class MisterObjectEnvironment<TValue, TValueAtomSource> : IFunctions<MisterObject, MisterObject, byte[], TValue, object>
+        where TValueAtomSource : struct, IMisterAtomSource<MisterObject>
     {
-        private readonly IMisterSerializer<TValue, TValueObjectSource> _serializer;
+        private readonly IMisterSerializer<TValue, MisterObject, TValueAtomSource> _serializer;
 
-        public MisterObjectEnvironment(IMisterSerializer<TValue, TValueObjectSource> serializer)
+        public MisterObjectEnvironment(IMisterSerializer<TValue, MisterObject, TValueAtomSource> serializer)
         {
             _serializer = serializer;
         }

@@ -13,7 +13,7 @@ namespace Marius.Mister
     {
         static void Main(string[] args)
         {
-            var serializer = new MisterStringSerializer();
+            var serializer = new MisterObjectStringSerializer();
             var settings = new MisterConnectionSettings()
             {
                 PageSizeBits = 20,
