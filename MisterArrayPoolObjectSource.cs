@@ -1,4 +1,5 @@
 ﻿using System.Buffers;
+using System.Runtime.CompilerServices;
 
 namespace Marius.Mister
 {
@@ -18,10 +19,11 @@ namespace Marius.Mister
             ArrayPool<byte>.Shared.Return(_buffer);
         }
 
-        public ref byte GetObjectBuffer(out int length)
+        public ref MisterObject GetObject()
         {
-            length = _length;
-            return ref _buffer[0];
+            ref var value = ref Unsafe.As<byte, MisterObject>(ref _buffer[0]);
+            value.Length = _length;
+            return ref value;
         }
     }
 }

@@ -427,19 +427,14 @@ namespace Marius.Mister
 
                 using (var source = _keySerializer.Serialize(key))
                 {
-                    ref var keyBuffer = ref source.GetObjectBuffer(out var length);
-                    fixed (byte* keyPointer = &keyBuffer)
-                    {
-                        ref var misterKey = ref *(MisterObject*)keyPointer;
-                        misterKey.Length = length;
+                    ref var misterKey = ref source.GetObject();
 
-                        status = _faster.Read(ref misterKey, ref input, ref output, state, sequence);
-                        if (status == Status.PENDING)
-                        {
-                            if (workItem.WaitPending)
-                                _faster.CompletePending(true);
-                            return false;
-                        }
+                    status = _faster.Read(ref misterKey, ref input, ref output, state, sequence);
+                    if (status == Status.PENDING)
+                    {
+                        if (workItem.WaitPending)
+                            _faster.CompletePending(true);
+                        return false;
                     }
                 }
 
@@ -476,25 +471,17 @@ namespace Marius.Mister
                 using (var keySource = _keySerializer.Serialize(key))
                 using (var valueSource = _valueSerializer.Serialize(value))
                 {
-                    ref var keyBuffer = ref keySource.GetObjectBuffer(out var keyLength);
-                    ref var valueBuffer = ref valueSource.GetObjectBuffer(out var valueLength);
-                    fixed (byte* keyPointer = &keyBuffer, valuePointer = &valueBuffer)
+                    ref var misterKey = ref keySource.GetObject();
+                    ref var misterValue = ref valueSource.GetObject();
+
+                    status = _faster.Upsert(ref misterKey, ref misterValue, state, sequence);
+                    Interlocked.Increment(ref _checkpointVersion);
+
+                    if (status == Status.PENDING)
                     {
-                        ref var misterKey = ref *(MisterObject*)keyPointer;
-                        ref var misterValue = ref *(MisterObject*)valuePointer;
-
-                        misterKey.Length = keyLength;
-                        misterValue.Length = valueLength;
-
-                        status = _faster.Upsert(ref misterKey, ref misterValue, state, sequence);
-                        Interlocked.Increment(ref _checkpointVersion);
-
-                        if (status == Status.PENDING)
-                        {
-                            if (workItem.WaitPending)
-                                _faster.CompletePending(true);
-                            return false;
-                        }
+                        if (workItem.WaitPending)
+                            _faster.CompletePending(true);
+                        return false;
                     }
                 }
 
@@ -529,21 +516,16 @@ namespace Marius.Mister
             {
                 using (var keySource = _keySerializer.Serialize(key))
                 {
-                    ref var buffer = ref keySource.GetObjectBuffer(out var length);
-                    fixed (byte* keyPointer = &buffer)
+                    ref var misterKey = ref keySource.GetObject();
+
+                    status = _faster.Delete(ref misterKey, state, sequence);
+                    Interlocked.Increment(ref _checkpointVersion);
+
+                    if (status == Status.PENDING)
                     {
-                        ref var misterKey = ref *(MisterObject*)keyPointer;
-                        misterKey.Length = length;
-
-                        status = _faster.Delete(ref misterKey, state, sequence);
-                        Interlocked.Increment(ref _checkpointVersion);
-
-                        if (status == Status.PENDING)
-                        {
-                            if (workItem.WaitPending)
-                                _faster.CompletePending(true);
-                            return false;
-                        }
+                        if (workItem.WaitPending)
+                            _faster.CompletePending(true);
+                        return false;
                     }
                 }
 

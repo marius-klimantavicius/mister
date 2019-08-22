@@ -1,4 +1,5 @@
 ﻿using System.IO;
+using System.Runtime.CompilerServices;
 
 namespace Marius.Mister
 {
@@ -16,12 +17,14 @@ namespace Marius.Mister
             _stream.Dispose();
         }
 
-        public ref byte GetObjectBuffer(out int length)
+        public ref MisterObject GetObject()
         {
-            length = (int)_stream.Length - 4;
-
             var buffer = _stream.GetBuffer();
-            return ref buffer[0];
+
+            ref var value = ref Unsafe.As<byte, MisterObject>(ref buffer[0]);
+            value.Length = (int)_stream.Length - 4;
+
+            return ref value;
         }
     }
 }
