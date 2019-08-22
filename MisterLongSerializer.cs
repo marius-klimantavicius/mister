@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Buffers;
+using System.Runtime.CompilerServices;
 
 namespace Marius.Mister
 {
@@ -14,16 +15,18 @@ namespace Marius.Mister
             return new MisterArrayPoolObjectSource(buffer, 8);
         }
 
-        public long Deserialize(ref byte value, int length)
+        public long Deserialize(ref MisterObject misterObject)
         {
+            var length = misterObject.Length;
+
             if (length == 0)
                 return 0L;
 
             if (length != 8)
                 throw new ArgumentOutOfRangeException(nameof(length));
 
-            fixed (byte* ptr = &value)
-                return *(long*)ptr;
+            ref var value = ref Unsafe.As<byte, long>(ref misterObject.Data);
+            return value;
         }
     }
 }

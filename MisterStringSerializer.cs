@@ -15,8 +15,11 @@ namespace Marius.Mister
             return new MisterArrayPoolObjectSource(buffer, value.Length * sizeof(char));
         }
 
-        public string Deserialize(ref byte value, int length)
+        public string Deserialize(ref MisterObject misterObject)
         {
+            ref var value = ref misterObject.Data;
+            var length = misterObject.Length;
+
             fixed (byte* ptr = &value)
                 return new string((char*)ptr, 0, length / sizeof(char));
         }

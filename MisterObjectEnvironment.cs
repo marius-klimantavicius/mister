@@ -18,12 +18,12 @@ namespace Marius.Mister
 
         public void SingleReader(ref MisterObject key, ref byte[] input, ref MisterObject value, ref TValue dst)
         {
-            dst = _serializer.Deserialize(ref value.Data, value.Length);
+            dst = _serializer.Deserialize(ref value);
         }
 
         public void ConcurrentReader(ref MisterObject key, ref byte[] input, ref MisterObject value, ref TValue dst)
         {
-            dst = _serializer.Deserialize(ref value.Data, value.Length);
+            dst = _serializer.Deserialize(ref value);
         }
 
         public void SingleWriter(ref MisterObject key, ref MisterObject src, ref MisterObject dst)
@@ -38,17 +38,7 @@ namespace Marius.Mister
 
         public bool ConcurrentWriter(ref MisterObject key, ref MisterObject src, ref MisterObject dst)
         {
-            if (dst.Length != src.Length)
-                return false;
-
-            var length = src.Length;
-            dst.Length = length;
-            fixed (byte* source = &src.Data, destination = &dst.Data)
-            {
-                Buffer.MemoryCopy(source, destination, length, length);
-            }
-
-            return true;
+            return false;
         }
 
         public void CopyUpdater(ref MisterObject key, ref byte[] input, ref MisterObject oldValue, ref MisterObject newValue)

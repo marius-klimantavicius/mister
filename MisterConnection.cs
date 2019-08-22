@@ -587,8 +587,8 @@ namespace Marius.Mister
                 ref var misterKey = ref iterator.GetKey();
                 ref var misterValue = ref iterator.GetValue();
 
-                var key = _keySerializer.Deserialize(ref misterKey.Data, misterKey.Length);
-                var value = _valueSerializer.Deserialize(ref misterValue.Data, misterValue.Length);
+                var key = _keySerializer.Deserialize(ref misterKey);
+                var value = _valueSerializer.Deserialize(ref misterValue);
 
                 var isDeleted = recordInfo.Tombstone;
                 forEachItem.OnRecord(key, value, isDeleted, forEachItem.State);

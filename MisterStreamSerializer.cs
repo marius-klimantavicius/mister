@@ -29,8 +29,11 @@ namespace Marius.Mister
             }
         }
 
-        public unsafe T Deserialize(ref byte value, int length)
+        public unsafe T Deserialize(ref MisterObject misterObject)
         {
+            ref var value = ref misterObject.Data;
+            var length = misterObject.Length;
+
             fixed (byte* data = &value)
             {
                 using (var stream = new UnmanagedMemoryStream(data, length))

@@ -4,6 +4,6 @@
         where TObjectSource: struct, IMisterObjectSource
     {
         TObjectSource Serialize(T value);
-        T Deserialize(ref byte value, int length);
+        T Deserialize(ref MisterObject value);
     }
 }
