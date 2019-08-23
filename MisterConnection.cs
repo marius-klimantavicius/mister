@@ -474,7 +474,7 @@ namespace Marius.Mister
 
         public Task CompactAsync()
         {
-            var tcs = new TaskCompletionSource<MisterVoid>();
+            var tcs = new TaskCompletionSource<MisterVoid>(TaskCreationOptions.RunContinuationsAsynchronously);
             _workQueue.Enqueue(new MisterWorkItem()
             {
                 Action = PerformCompact,
