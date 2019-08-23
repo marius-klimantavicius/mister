@@ -48,12 +48,19 @@ namespace Marius.Mister
             WorkerRefreshIntervalMilliseconds = 1000;
         }
 
-        public void Apply(LogSettings logSettings)
+        public virtual LogSettings GetLogSettings(IDevice mainDevice)
         {
+            var logSettings = new LogSettings
+            {
+                LogDevice = mainDevice,
+            };
+
             if (PageSizeBits != null) logSettings.PageSizeBits = PageSizeBits.Value;
             if (SegmentSizeBits != null) logSettings.SegmentSizeBits = SegmentSizeBits.Value;
             if (MemorySizeBits != null) logSettings.MemorySizeBits = MemorySizeBits.Value;
             if (MutableFraction != null) logSettings.MutableFraction = MutableFraction.Value;
+
+            return logSettings;
         }
     }
 }

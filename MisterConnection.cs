@@ -13,47 +13,40 @@ namespace Marius.Mister
 {
     public static class MisterConnection
     {
-        public static MisterConnection<TKey, TValue, MisterObject, TKeyAtomSource, MisterObject, TValueAtomSource> Create<TKey, TValue, TKeyAtomSource, TValueAtomSource>(DirectoryInfo directory, IMisterObjectSerializer<TKey, TKeyAtomSource> keySerializer, IMisterObjectSerializer<TValue, TValueAtomSource> valueSerializer, MisterConnectionSettings settings = null, string name = null)
+        public static MisterConnection<TKey, TValue, TKeyAtomSource, TValueAtomSource> Create<TKey, TValue, TKeyAtomSource, TValueAtomSource>(DirectoryInfo directory, IMisterObjectSerializer<TKey, TKeyAtomSource> keySerializer, IMisterObjectSerializer<TValue, TValueAtomSource> valueSerializer, MisterConnectionSettings settings = null, string name = null)
             where TKeyAtomSource : struct, IMisterAtomSource<MisterObject>
             where TValueAtomSource : struct, IMisterAtomSource<MisterObject>
         {
-            return new MisterConnection<TKey, TValue, MisterObject, TKeyAtomSource, MisterObject, TValueAtomSource>(GetProvider(keySerializer, valueSerializer), directory, settings, name);
+            return new MisterConnection<TKey, TValue, TKeyAtomSource, TValueAtomSource>(directory, keySerializer, valueSerializer, settings, name);
         }
 
-        public static MisterConnection<TKey, TValue, MisterObject, MisterStreamObjectSource, MisterObject, TValueAtomSource> Create<TKey, TValue, TValueAtomSource>(DirectoryInfo directory, IMisterStreamSerializer<TKey> keyStreamSerializer, IMisterObjectSerializer<TValue, TValueAtomSource> valueSerializer, MisterConnectionSettings settings = null, string name = null, IMisterStreamManager streamManager = null)
+        public static MisterConnection<TKey, TValue, MisterStreamObjectSource, TValueAtomSource> Create<TKey, TValue, TValueAtomSource>(DirectoryInfo directory, IMisterStreamSerializer<TKey> keyStreamSerializer, IMisterObjectSerializer<TValue, TValueAtomSource> valueSerializer, MisterConnectionSettings settings = null, string name = null, IMisterStreamManager streamManager = null)
             where TValueAtomSource : struct, IMisterAtomSource<MisterObject>
         {
             streamManager = streamManager ?? MisterArrayPoolStreamManager.Default;
             var keySerializer = new MisterStreamSerializer<TKey>(keyStreamSerializer, streamManager);
 
-            return new MisterConnection<TKey, TValue, MisterObject, MisterStreamObjectSource, MisterObject, TValueAtomSource>(GetProvider(keySerializer, valueSerializer), directory, settings, name);
+            return new MisterConnection<TKey, TValue, MisterStreamObjectSource, TValueAtomSource>(directory, keySerializer, valueSerializer, settings, name);
         }
 
-        public static MisterConnection<TKey, TValue, MisterObject, TKeyAtomSource, MisterObject, MisterStreamObjectSource> Create<TKey, TValue, TKeyAtomSource>(DirectoryInfo directory, IMisterObjectSerializer<TKey, TKeyAtomSource> keySerializer, IMisterStreamSerializer<TValue> valueStreamSerializer, MisterConnectionSettings settings = null, string name = null, IMisterStreamManager streamManager = null)
+        public static MisterConnection<TKey, TValue, TKeyAtomSource, MisterStreamObjectSource> Create<TKey, TValue, TKeyAtomSource>(DirectoryInfo directory, IMisterObjectSerializer<TKey, TKeyAtomSource> keySerializer, IMisterStreamSerializer<TValue> valueStreamSerializer, MisterConnectionSettings settings = null, string name = null, IMisterStreamManager streamManager = null)
             where TKeyAtomSource : struct, IMisterAtomSource<MisterObject>
         {
             streamManager = streamManager ?? MisterArrayPoolStreamManager.Default;
             var valueSerializer = new MisterStreamSerializer<TValue>(valueStreamSerializer, streamManager);
 
-            return new MisterConnection<TKey, TValue, MisterObject, TKeyAtomSource, MisterObject, MisterStreamObjectSource>(GetProvider(keySerializer, valueSerializer), directory, settings, name);
+            return new MisterConnection<TKey, TValue, TKeyAtomSource, MisterStreamObjectSource>(directory, keySerializer, valueSerializer, settings, name);
         }
 
         public static MisterConnection<TKey, TValue> Create<TKey, TValue>(DirectoryInfo directory, IMisterStreamSerializer<TKey> keySerializer, IMisterStreamSerializer<TValue> valueSerializer, MisterConnectionSettings settings = null, string name = null, IMisterStreamManager streamManager = null)
         {
             return new MisterConnection<TKey, TValue>(directory, keySerializer, valueSerializer, settings, name, streamManager);
         }
-
-        public static MisterObjectConnectionProvider<TKey, TValue, TKeyAtomSource, TValueAtomSource> GetProvider<TKey, TValue, TKeyAtomSource, TValueAtomSource>(IMisterObjectSerializer<TKey, TKeyAtomSource> keySerializer, IMisterObjectSerializer<TValue, TValueAtomSource> valueSerializer)
-            where TKeyAtomSource : struct, IMisterAtomSource<MisterObject>
-            where TValueAtomSource : struct, IMisterAtomSource<MisterObject>
-        {
-            return new MisterObjectConnectionProvider<TKey, TValue, TKeyAtomSource, TValueAtomSource>(keySerializer, valueSerializer);
-        }
     }
 
     public sealed class MisterConnection<TKey, TValue> : IMisterConnection<TKey, TValue>
     {
-        private readonly MisterConnection<TKey, TValue, MisterObject, MisterStreamObjectSource, MisterObject, MisterStreamObjectSource> _underlyingConnection;
+        private readonly MisterConnection<TKey, TValue, MisterStreamObjectSource, MisterStreamObjectSource> _underlyingConnection;
         private readonly IMisterStreamManager _streamManager;
 
         public MisterConnection(DirectoryInfo directory, IMisterStreamSerializer<TKey> keySerializer, IMisterStreamSerializer<TValue> valueSerializer, MisterConnectionSettings settings = null, string name = null)
@@ -76,9 +69,8 @@ namespace Marius.Mister
 
             var streamKeySerializer = new MisterStreamSerializer<TKey>(keySerializer, _streamManager);
             var streamValueSerializer = new MisterStreamSerializer<TValue>(valueSerializer, _streamManager);
-            var provider = MisterConnection.GetProvider(streamKeySerializer, streamValueSerializer);
 
-            _underlyingConnection = new MisterConnection<TKey, TValue, MisterObject, MisterStreamObjectSource, MisterObject, MisterStreamObjectSource>(provider, directory, settings, name);
+            _underlyingConnection = new MisterConnection<TKey, TValue, MisterStreamObjectSource, MisterStreamObjectSource>(directory, streamKeySerializer, streamValueSerializer, settings, name);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -154,11 +146,59 @@ namespace Marius.Mister
         }
     }
 
-    public sealed class MisterConnection<TKey, TValue, TKeyAtom, TKeyAtomSource, TValueAtom, TValueAtomSource> : IMisterConnection<TKey, TValue>
+    public sealed class MisterConnection<TKey, TValue, TKeyAtomSource, TValueAtomSource> : MisterConnection
+        <
+            TKey, 
+            TValue, 
+            MisterObject, 
+            TKeyAtomSource, 
+            MisterObject, 
+            TValueAtomSource,
+            FasterKV<MisterObject, MisterObject, byte[], TValue, object, MisterObjectEnvironment<TValue, TValueAtomSource>>
+        >
+        where TKeyAtomSource : struct, IMisterAtomSource<MisterObject>
+        where TValueAtomSource : struct, IMisterAtomSource<MisterObject>
+    {
+        public MisterConnection(DirectoryInfo directory, IMisterSerializer<TKey, MisterObject, TKeyAtomSource> keySerializer, IMisterSerializer<TValue, MisterObject, TValueAtomSource> valueSerializer, MisterConnectionSettings settings = null, string name = null)
+            : base(directory, keySerializer, valueSerializer, settings, name)
+        {
+            Initialize();
+        }
+
+        protected override void Create()
+        {
+            if (_faster != null)
+                _faster.Dispose();
+
+            if (_mainDevice != null)
+                _mainDevice.Close();
+
+            var environment = new MisterObjectEnvironment<TValue, TValueAtomSource>(_valueSerializer);
+            var variableLengthStructSettings = new VariableLengthStructSettings<MisterObject, MisterObject>()
+            {
+                keyLength = new MisterObjectVariableLengthStruct(),
+                valueLength = new MisterObjectVariableLengthStruct(),
+            };
+
+            _mainDevice = Devices.CreateLogDevice(Path.Combine(_directory.FullName, @"hlog.log"));
+            _faster = new FasterKV<MisterObject, MisterObject, byte[], TValue, object, MisterObjectEnvironment<TValue, TValueAtomSource>>(
+                _settings.IndexSize,
+                environment,
+                _settings.GetLogSettings(_mainDevice),
+                new CheckpointSettings() { CheckpointDir = _directory.FullName, CheckPointType = CheckpointType.FoldOver },
+                serializerSettings: null,
+                comparer: MisterObjectEqualityComparer.Instance,
+                variableLengthStructSettings: variableLengthStructSettings
+            );
+        }
+    }
+
+    public abstract class MisterConnection<TKey, TValue, TKeyAtom, TKeyAtomSource, TValueAtom, TValueAtomSource, TFaster> : IMisterConnection<TKey, TValue>
         where TKeyAtom : new()
         where TValueAtom : new()
         where TKeyAtomSource : struct, IMisterAtomSource<TKeyAtom>
         where TValueAtomSource : struct, IMisterAtomSource<TValueAtom>
+        where TFaster : IFasterKV<TKeyAtom, TValueAtom, byte[], TValue, object>
     {
         private static readonly ILog Log = LogManager.GetLogger("MisterConnection");
 
@@ -198,16 +238,7 @@ namespace Marius.Mister
             public object State;
         }
 
-        private readonly IMisterConnectionProvider<TKey, TValue, TKeyAtom, TKeyAtomSource, TValueAtom, TValueAtomSource> _provider;
-        private readonly DirectoryInfo _directory;
-        private readonly IMisterSerializer<TKey, TKeyAtom, TKeyAtomSource> _keySerializer;
-        private readonly IMisterSerializer<TValue, TValueAtom, TValueAtomSource> _valueSerializer;
-        private readonly MisterConnectionSettings _settings;
-        private readonly string _name;
         private readonly CancellationTokenSource _cancellationTokenSource;
-
-        private IFasterKV<TKeyAtom, TValueAtom, byte[], TValue, object> _faster;
-        private IDevice _mainDevice;
 
         private ConcurrentQueue<MisterWorkItem> _workQueue;
         private Thread[] _workerThreads;
@@ -221,29 +252,32 @@ namespace Marius.Mister
 
         private bool _isClosed;
 
-        public MisterConnection(IMisterConnectionProvider<TKey, TValue, TKeyAtom, TKeyAtomSource, TValueAtom, TValueAtomSource> provider, DirectoryInfo directory, MisterConnectionSettings settings = null, string name = null)
-        {
-            if (provider == null)
-                throw new ArgumentNullException(nameof(provider));
+        protected readonly DirectoryInfo _directory;
+        protected readonly IMisterSerializer<TKey, TKeyAtom, TKeyAtomSource> _keySerializer;
+        protected readonly IMisterSerializer<TValue, TValueAtom, TValueAtomSource> _valueSerializer;
+        protected readonly MisterConnectionSettings _settings;
+        protected readonly string _name;
 
+        protected TFaster _faster;
+        protected IDevice _mainDevice;
+
+        public MisterConnection(DirectoryInfo directory, IMisterSerializer<TKey, TKeyAtom, TKeyAtomSource> keySerializer, IMisterSerializer<TValue, TValueAtom, TValueAtomSource> valueSerializer, MisterConnectionSettings settings = null, string name = null)
+        {
             if (directory == null)
                 throw new ArgumentNullException(nameof(directory));
 
-            if (provider.KeySerializer == null)
-                throw new ArgumentNullException(nameof(provider.KeySerializer));
+            if (keySerializer is null)
+                throw new ArgumentNullException(nameof(keySerializer));
 
-            if (provider.ValueSerializer == null)
-                throw new ArgumentNullException(nameof(provider.ValueSerializer));
+            if (valueSerializer is null)
+                throw new ArgumentNullException(nameof(valueSerializer));
 
-            _provider = provider;
             _directory = directory;
-            _keySerializer = provider.KeySerializer;
-            _valueSerializer = provider.ValueSerializer;
+            _keySerializer = keySerializer;
+            _valueSerializer = valueSerializer;
             _settings = settings ?? new MisterConnectionSettings();
             _name = name;
             _cancellationTokenSource = new CancellationTokenSource();
-
-            Initialize();
         }
 
         public void Close()
@@ -451,6 +485,35 @@ namespace Marius.Mister
                 Monitor.Pulse(_workQueue);
 
             return tcs.Task;
+        }
+
+        protected abstract void Create();
+
+        protected void Initialize()
+        {
+            var checkpointTokenFile = new FileInfo(Path.Combine(_directory.FullName, "checkpoint_token.txt"));
+            var checkpointTokenBackupFile = new FileInfo(Path.Combine(_directory.FullName, "checkpoint_token_backup.txt"));
+
+            CleanOldCheckpoints(checkpointTokenFile, checkpointTokenBackupFile);
+
+            if (!TryRecover(checkpointTokenFile))
+            {
+                if (!TryRecover(checkpointTokenBackupFile))
+                    Create();
+            }
+
+            _workQueue = new ConcurrentQueue<MisterWorkItem>();
+            _workerThreads = new Thread[_settings.WorkerThreadCount];
+            for (var i = 0; i < _workerThreads.Length; i++)
+                _workerThreads[i] = new Thread(WorkerLoop) { IsBackground = true, Name = $"{_name ?? "Mister"} worker thread #{i + 1}" };
+
+            _checkpointQueue = new ConcurrentQueue<MisterCheckpointItem>();
+            _checkpointThread = new Thread(CheckpointLoop) { IsBackground = true, Name = $"{_name ?? "Mister"} checkpoint thread" };
+
+            for (var i = 0; i < _workerThreads.Length; i++)
+                _workerThreads[i].Start(i.ToString());
+
+            _checkpointThread.Start();
         }
 
         private unsafe bool PerformGet(ref MisterWorkItem workItem, long sequence)
@@ -687,45 +750,6 @@ namespace Marius.Mister
                 Monitor.Pulse(_checkpointQueue);
 
             return tsc.Task;
-        }
-
-        private void Initialize()
-        {
-            var checkpointTokenFile = new FileInfo(Path.Combine(_directory.FullName, "checkpoint_token.txt"));
-            var checkpointTokenBackupFile = new FileInfo(Path.Combine(_directory.FullName, "checkpoint_token_backup.txt"));
-
-            CleanOldCheckpoints(checkpointTokenFile, checkpointTokenBackupFile);
-
-            if (!TryRecover(checkpointTokenFile))
-            {
-                if (!TryRecover(checkpointTokenBackupFile))
-                    Create();
-            }
-
-            _workQueue = new ConcurrentQueue<MisterWorkItem>();
-            _workerThreads = new Thread[_settings.WorkerThreadCount];
-            for (var i = 0; i < _workerThreads.Length; i++)
-                _workerThreads[i] = new Thread(WorkerLoop) { IsBackground = true, Name = $"{_name ?? "Mister"} worker thread #{i + 1}" };
-
-            _checkpointQueue = new ConcurrentQueue<MisterCheckpointItem>();
-            _checkpointThread = new Thread(CheckpointLoop) { IsBackground = true, Name = $"{_name ?? "Mister"} checkpoint thread" };
-
-            for (var i = 0; i < _workerThreads.Length; i++)
-                _workerThreads[i].Start(i.ToString());
-
-            _checkpointThread.Start();
-        }
-
-        private void Create()
-        {
-            if (_faster != null)
-                _faster.Dispose();
-
-            if (_mainDevice != null)
-                _mainDevice.Close();
-
-            _mainDevice = _provider.CreateDevice(_directory);
-            _faster = _provider.Create(_directory, _settings, _mainDevice);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
