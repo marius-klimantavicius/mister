@@ -9,15 +9,34 @@ using System.Threading.Tasks;
 
 namespace Marius.Mister
 {
-    class Program
+    public static class Program
     {
-        static void Main(string[] args)
+        private struct DurationLogger : IDisposable
+        {
+            private Stopwatch _stopwatch;
+
+            public DurationLogger(Stopwatch stopwatch)
+            {
+                _stopwatch = stopwatch;
+                _stopwatch.Restart();
+            }
+
+            public void Dispose()
+            {
+                if (_stopwatch != null)
+                {
+                    Console.WriteLine(_stopwatch.Elapsed);
+                }
+            }
+        }
+
+        public static async Task Main(string[] args)
         {
             var serializer = new MisterObjectStringSerializer();
             var settings = new MisterConnectionSettings()
             {
                 PageSizeBits = 20,
-                SegmentSizeBits = 21,
+                SegmentSizeBits = 25,
             };
 
             var connection = MisterConnection.Create(new DirectoryInfo(@"C:\Mister"), serializer, serializer, settings: settings);
@@ -35,34 +54,54 @@ namespace Marius.Mister
 
                 if (parts[0] == "set" && parts.Length > 2)
                 {
-                    connection.SetAsync(parts[1], parts[2]).GetAwaiter().GetResult();
+                    using (new DurationLogger(sw))
+                    {
+                        await connection.SetAsync(parts[1], parts[2]);
+                    }
                 }
                 else if (parts[0] == "get" && parts.Length > 1)
                 {
-                    var value = connection.GetAsync(parts[1]).GetAwaiter().GetResult();
+                    var value = await connection.GetAsync(parts[1]);
                     Console.WriteLine(value);
                 }
                 else if (parts[0] == "cp")
                 {
-                    connection.Checkpoint();
+                    using (new DurationLogger(sw))
+                    {
+                        await connection.CheckpointAsync();
+                    }
                 }
                 else if (parts[0] == "flush")
                 {
-                    connection.FlushAsync(true).GetAwaiter().GetResult();
+                    using (new DurationLogger(sw))
+                    {
+                        await connection.FlushAsync(true);
+                    }
                 }
                 else if (parts[0] == "del" && parts.Length > 1)
                 {
-                    connection.DeleteAsync(parts[1]).GetAwaiter().GetResult();
+                    using (new DurationLogger(sw))
+                    {
+                        await connection.DeleteAsync(parts[1]);
+                    }
                 }
                 else if (parts[0] == "en")
                 {
-                    var semaphore = new SemaphoreSlim(0);
-                    connection.ForEach((key, value, isDeleted, _) =>
+                    var isSilent = false;
+                    if (parts.Length > 1 && parts[1] == "silent")
+                        isSilent = true;
+
+                    using (new DurationLogger(sw))
                     {
-                        Console.WriteLine($"{(isDeleted ? "[dead] " : "")}{key} - {value}");
-                    },
-                    (sem) => ((SemaphoreSlim)sem).Release(), semaphore);
-                    semaphore.Wait();
+                        var semaphore = new SemaphoreSlim(0);
+                        connection.ForEach((key, value, isDeleted, _) =>
+                        {
+                            if (!isSilent)
+                                Console.WriteLine($"{(isDeleted ? "[dead] " : "")}{key} - {value}");
+                        },
+                        (sem) => ((SemaphoreSlim)sem).Release(), semaphore);
+                        await semaphore.WaitAsync();
+                    }
                 }
                 else if (parts[0] == "setn" && parts.Length > 1)
                 {
@@ -73,23 +112,28 @@ namespace Marius.Mister
                     if (parts.Length > 2)
                         prefix = parts[2];
 
-                    sw.Restart();
-                    var tasks = new Task[count];
-                    for (var i = 0; i < tasks.Length; i++)
+                    using (new DurationLogger())
                     {
-                        tasks[i] = connection.SetAsync($"{prefix}{i}", $"{prefix}{i}");
-                    }
+                        var tasks = new Task[count];
+                        for (var i = 0; i < tasks.Length; i++)
+                        {
+                            tasks[i] = connection.SetAsync($"{prefix}{i}", $"{prefix}{i}");
+                        }
 
-                    Task.WaitAll(tasks);
-                    Console.WriteLine(sw.Elapsed);
+                        await Task.WhenAll(tasks);
+                        Console.WriteLine(sw.Elapsed);
+                    }
                 }
                 else if (parts[0] == "compact")
                 {
-                    connection.CompactAsync().GetAwaiter().GetResult();
+                    using (new DurationLogger(sw))
+                    {
+                        await connection.CompactAsync();
+                    }
                 }
             }
+
             connection.Close();
-            Console.WriteLine(sw.Elapsed);
 
             Console.WriteLine("Done.");
             Console.ReadLine();

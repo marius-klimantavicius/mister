@@ -4,6 +4,8 @@ namespace Marius.Mister
 {
     public class MisterObjectVariableLengthStruct : IVariableLengthStruct<MisterObject>
     {
+        public static MisterObjectVariableLengthStruct Instance = new MisterObjectVariableLengthStruct();
+
         public int GetAverageLength()
         {
             return 4 * sizeof(int);
