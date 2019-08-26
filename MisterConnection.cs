@@ -468,7 +468,7 @@ namespace Marius.Mister
 
         protected virtual MisterConnectionMaintenanceService<TValue, TKeyAtom, TValueAtom, TFaster> CreateMaintenanceService()
         {
-            return new MisterConnectionMaintenanceService<TValue, TKeyAtom, TValueAtom, TFaster>(_directory, _settings.MaintenanceIntervalMilliseconds, _settings.CheckpointCleanCount, _name);
+            return new MisterConnectionMaintenanceService<TValue, TKeyAtom, TValueAtom, TFaster>(_directory, _settings.CheckpointIntervalMilliseconds, _settings.CheckpointCleanCount, _name);
         }
 
         protected void Initialize()

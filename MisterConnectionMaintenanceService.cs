@@ -37,7 +37,6 @@ namespace Marius.Mister
         private readonly DirectoryInfo _directory;
         private readonly FileInfo _checkpointTokenFile;
         private readonly FileInfo _checkpointTokenBackupFile;
-        private readonly int _maintenanceIntervalMilliseconds;
         private readonly string _name;
 
         private readonly Guid[] _takenCheckpoints;
@@ -51,16 +50,18 @@ namespace Marius.Mister
         private Thread _maintenanceThread;
         private int _isRunning;
 
+        protected readonly int _checkpointIntervalMilliseconds;
+
         protected TFaster _faster;
 
         public bool IsRunning => Volatile.Read(ref _isRunning) != 0;
 
-        public MisterConnectionMaintenanceService(DirectoryInfo directory, int maintenanceIntervalMilliseconds, int checkpointCleanCount, string name)
+        public MisterConnectionMaintenanceService(DirectoryInfo directory, int checkpointIntervalMilliseconds, int checkpointCleanCount, string name)
         {
             _directory = directory;
             _checkpointTokenFile = new FileInfo(Path.Combine(directory.FullName, "checkpoint_token.txt"));
             _checkpointTokenBackupFile = new FileInfo(Path.Combine(directory.FullName, "checkpoint_token_backup.txt"));
-            _maintenanceIntervalMilliseconds = maintenanceIntervalMilliseconds;
+            _checkpointIntervalMilliseconds = checkpointIntervalMilliseconds;
             _name = name;
 
             _takenCheckpoints = new Guid[checkpointCleanCount];
@@ -69,13 +70,13 @@ namespace Marius.Mister
             _maintenanceQueue = new ConcurrentQueue<MisterMaintenanceItem>();
         }
 
-        public void Start()
+        public virtual void Start()
         {
             _maintenanceThread = new Thread(MaintenanceLoop) { IsBackground = true, Name = $"{_name ?? "Mister"} checkpoint thread" };
             _maintenanceThread.Start();
         }
 
-        public void Stop()
+        public virtual void Stop()
         {
             _cancellationTokenSource.Cancel();
 
@@ -85,11 +86,16 @@ namespace Marius.Mister
             _maintenanceThread.Join();
         }
 
-        public void Close()
+        public virtual void Close()
         {
             PerformCheckpoint();
 
             _cancellationTokenSource.Dispose();
+        }
+
+        public void IncrementVersion()
+        {
+            Interlocked.Increment(ref _checkpointVersion);
         }
 
         public void Recover(Func<TFaster> create)
@@ -101,11 +107,6 @@ namespace Marius.Mister
                 if (!TryRecover(create, _checkpointTokenBackupFile))
                     _faster = create();
             }
-        }
-
-        public void IncrementVersion()
-        {
-            Interlocked.Increment(ref _checkpointVersion);
         }
 
         public void Checkpoint()
@@ -132,9 +133,10 @@ namespace Marius.Mister
             return tsc.Task;
         }
 
-        protected virtual void Maintain()
+        protected virtual int Maintain()
         {
             PerformCheckpoint();
+            return _checkpointIntervalMilliseconds;
         }
 
         protected void PerformCheckpoint()
@@ -199,6 +201,14 @@ namespace Marius.Mister
                     Log.Error(ex);
                 }
             }
+        }
+
+        protected void Execute()
+        {
+            _maintenanceQueue.Enqueue(new MisterMaintenanceItem() { });
+
+            lock (_maintenanceQueue)
+                Monitor.Pulse(_maintenanceQueue);
         }
 
         private bool TryRecover(Func<TFaster> create, FileInfo checkpointTokenFile)
@@ -296,6 +306,7 @@ namespace Marius.Mister
 
         private void MaintenanceLoop()
         {
+            var waitTime = 0;
             try
             {
                 Volatile.Write(ref _isRunning, 1);
@@ -306,12 +317,15 @@ namespace Marius.Mister
                     lock (_maintenanceQueue)
                     {
                         if (_maintenanceQueue.IsEmpty && !_cancellationTokenSource.IsCancellationRequested)
-                            Monitor.Wait(_maintenanceQueue, _maintenanceIntervalMilliseconds);
+                            Monitor.Wait(_maintenanceQueue, waitTime);
+
+                        if (_cancellationTokenSource.IsCancellationRequested)
+                            return;
                     }
 
                     _maintenanceQueue.TryDequeue(out checkpointItem);
 
-                    Maintain();
+                    waitTime = Maintain();
 
                     if (checkpointItem.ResetEvent != null)
                         checkpointItem.ResetEvent.Set();

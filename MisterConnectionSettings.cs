@@ -9,7 +9,7 @@ namespace Marius.Mister
 {
     public class MisterConnectionSettings
     {
-        public int MaintenanceIntervalMilliseconds { get; set; }
+        public int CheckpointIntervalMilliseconds { get; set; }
         public int CheckpointCleanCount { get; set; }
 
         public int WorkerThreadCount { get; set; }
@@ -41,7 +41,7 @@ namespace Marius.Mister
         {
             IndexSize = 1L << 20;
 
-            MaintenanceIntervalMilliseconds = 10 * 60 * 1000;
+            CheckpointIntervalMilliseconds = 10 * 60 * 1000;
             CheckpointCleanCount = 16;
 
             WorkerThreadCount = Environment.ProcessorCount;
