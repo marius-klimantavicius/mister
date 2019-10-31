@@ -7,15 +7,19 @@ namespace Marius.Mister
     {
         void Close();
         void Checkpoint();
-        Task FlushAsync(bool waitPending);
         Task CheckpointAsync();
-        Task<TValue> GetAsync(TKey key);
-        Task<TValue> GetAsync(TKey key, bool waitPending);
-        Task SetAsync(TKey key, TValue value);
-        Task SetAsync(TKey key, TValue value, bool waitPending);
-        Task DeleteAsync(TKey key);
-        Task DeleteAsync(TKey key, bool waitPending);
+        Task FlushAsync(bool waitPending = false);
+        Task<TValue> GetAsync(TKey key, bool waitPending = false);
+        Task SetAsync(TKey key, TValue value, bool waitPending = false);
+        Task DeleteAsync(TKey key, bool waitPending = false);
+        T FlushAsync<T>(T notifyCompletion, bool waitPending = false)
+            where T : class, IMisterNotifyCompletion;
+        T GetAsync<T>(TKey key, T notifyCompletion, bool waitPending = false)
+            where T : class, IMisterNotifyCompletion<TValue>;
+        T SetAsync<T>(TKey key, TValue value, T notifyCompletion, bool waitPending = false)
+            where T : class, IMisterNotifyCompletion;
+        T DeleteAsync<T>(TKey key, T notifyCompletion, bool waitPending = false)
+                   where T : class, IMisterNotifyCompletion;
         void ForEach(Action<TKey, TValue, bool, object> onRecord, Action<object> onCompleted = null, object state = default(object));
-        Task CompactAsync();
     }
 }

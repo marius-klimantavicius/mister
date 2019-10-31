@@ -93,14 +93,16 @@ namespace Marius.Mister
 
                     using (new DurationLogger(sw))
                     {
-                        var semaphore = new SemaphoreSlim(0);
-                        connection.ForEach((key, value, isDeleted, _) =>
+                        using (var semaphore = new SemaphoreSlim(0))
                         {
-                            if (!isSilent)
-                                Console.WriteLine($"{(isDeleted ? "[dead] " : "")}{key} - {value}");
-                        },
-                        (sem) => ((SemaphoreSlim)sem).Release(), semaphore);
-                        await semaphore.WaitAsync();
+                            connection.ForEach((key, value, isDeleted, _) =>
+                            {
+                                if (!isSilent)
+                                    Console.WriteLine($"{(isDeleted ? "[dead] " : "")}{key} - {value}");
+                            },
+                            (sem) => ((SemaphoreSlim)sem).Release(), semaphore);
+                            await semaphore.WaitAsync();
+                        }
                     }
                 }
                 else if (parts[0] == "setn" && parts.Length > 1)
@@ -122,13 +124,6 @@ namespace Marius.Mister
 
                         await Task.WhenAll(tasks);
                         Console.WriteLine(sw.Elapsed);
-                    }
-                }
-                else if (parts[0] == "compact")
-                {
-                    using (new DurationLogger(sw))
-                    {
-                        await connection.CompactAsync();
                     }
                 }
             }

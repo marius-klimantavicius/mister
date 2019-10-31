@@ -65,8 +65,8 @@ namespace Marius.Mister
             if (ctx == null)
                 return;
 
-            var tcs = Unsafe.As<TaskCompletionSource<MisterVoid>>(ctx);
-            tcs.TrySetResult(MisterVoid.Value);
+            var tcs = Unsafe.As<IMisterNotifyCompletion>(ctx);
+            tcs.SetResult();
         }
 
         public void ReadCompletionCallback(ref MisterObject key, ref byte[] input, ref TValue output, object ctx, Status status)
@@ -74,11 +74,11 @@ namespace Marius.Mister
             if (ctx == null)
                 return;
 
-            var tcs = Unsafe.As<TaskCompletionSource<TValue>>(ctx);
+            var tcs = Unsafe.As<IMisterNotifyCompletion<TValue>>(ctx);
             if (status == Status.ERROR)
-                tcs.TrySetException(new Exception());
+                tcs.SetException(new Exception());
             else
-                tcs.TrySetResult(output);
+                tcs.SetResult(output);
         }
 
         public void RMWCompletionCallback(ref MisterObject key, ref byte[] input, object ctx, Status status)
@@ -90,8 +90,8 @@ namespace Marius.Mister
             if (ctx == null)
                 return;
 
-            var tcs = Unsafe.As<TaskCompletionSource<MisterVoid>>(ctx);
-            tcs.TrySetResult(MisterVoid.Value);
+            var tcs = Unsafe.As<IMisterNotifyCompletion>(ctx);
+            tcs.SetResult();
         }
     }
 }

@@ -4,6 +4,7 @@
 using Microsoft.Win32.SafeHandles;
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -24,30 +25,70 @@ namespace FASTER.core
         /// <summary>
         /// 
         /// </summary>
-        /// <param name="filename"></param>
+        /// <param name="filename">File name (or prefix) with path</param>
         /// <param name="preallocateFile"></param>
         /// <param name="deleteOnClose"></param>
-        public ManagedLocalStorageDevice(string filename, bool preallocateFile = false, bool deleteOnClose = false)
-            : base(filename, GetSectorSize(filename))
+        /// <param name="capacity">The maximal number of bytes this storage device can accommondate, or CAPACITY_UNSPECIFIED if there is no such limit</param>
+        /// <param name="recoverDevice">Whether to recover device metadata from existing files</param>
+        public ManagedLocalStorageDevice(string filename, bool preallocateFile = false, bool deleteOnClose = false, long capacity = Devices.CAPACITY_UNSPECIFIED, bool recoverDevice = false)
+            : base(filename, GetSectorSize(filename), capacity)
         {
             pool = new SectorAlignedBufferPool(1, 1);
 
             this.preallocateFile = preallocateFile;
             this.deleteOnClose = deleteOnClose;
             logHandles = new ConcurrentDictionary<int, Stream>();
+            if (recoverDevice)
+                RecoverFiles();
         }
+
+
+        private void RecoverFiles()
+        {
+            FileInfo fi = new FileInfo(FileName); // may not exist
+            DirectoryInfo di = fi.Directory;
+            if (!di.Exists) return;
+
+            string bareName = fi.Name;
+
+            List<int> segids = new List<int>();
+            foreach (FileInfo item in di.GetFiles(bareName + "*"))
+            {
+                segids.Add(Int32.Parse(item.Name.Replace(bareName, "").Replace(".", "")));
+            }
+            segids.Sort();
+
+            int prevSegmentId = -1;
+            foreach (int segmentId in segids)
+            {
+                if (segmentId != prevSegmentId + 1)
+                {
+                    startSegment = segmentId;
+                }
+                else
+                {
+                    endSegment = segmentId;
+                }
+                prevSegmentId = segmentId;
+            }
+            // No need to populate map because logHandles use Open or create on files.
+        }
+
+
 
 
         class ReadCallbackWrapper
         {
+            readonly Stream logHandle;
             readonly IOCompletionCallback callback;
             readonly IAsyncResult asyncResult;
             SectorAlignedMemory memory;
             readonly IntPtr destinationAddress;
             readonly uint readLength;
 
-            public ReadCallbackWrapper(IOCompletionCallback callback, IAsyncResult asyncResult, SectorAlignedMemory memory, IntPtr destinationAddress, uint readLength)
+            public ReadCallbackWrapper(Stream logHandle, IOCompletionCallback callback, IAsyncResult asyncResult, SectorAlignedMemory memory, IntPtr destinationAddress, uint readLength)
             {
+                this.logHandle = logHandle;
                 this.callback = callback;
                 this.asyncResult = asyncResult;
                 this.memory = memory;
@@ -57,34 +98,56 @@ namespace FASTER.core
 
             public unsafe void Callback(IAsyncResult result)
             {
-                fixed (void* source = memory.buffer)
+                uint errorCode = 0;
+                try
                 {
-                    Buffer.MemoryCopy(source, (void*)destinationAddress, readLength, readLength);
+                    logHandle.EndRead(result);
+                    fixed (void* source = memory.buffer)
+                    {
+                        Buffer.MemoryCopy(source, (void*)destinationAddress, readLength, readLength);
+                    }
                 }
+                catch
+                {
+                    errorCode = 1;
+                }
+
                 memory.Return();
                 Overlapped ov = new Overlapped(0, 0, IntPtr.Zero, asyncResult);
-                callback(0, 0, ov.UnsafePack(callback, IntPtr.Zero));
+                callback(errorCode, 0, ov.UnsafePack(callback, IntPtr.Zero));
             }
         }
 
         class WriteCallbackWrapper
         {
+            readonly Stream logHandle;
             readonly IOCompletionCallback callback;
             readonly IAsyncResult asyncResult;
             SectorAlignedMemory memory;
 
-            public WriteCallbackWrapper(IOCompletionCallback callback, IAsyncResult asyncResult, SectorAlignedMemory memory)
+            public WriteCallbackWrapper(Stream logHandle, IOCompletionCallback callback, IAsyncResult asyncResult, SectorAlignedMemory memory)
             {
                 this.callback = callback;
                 this.asyncResult = asyncResult;
                 this.memory = memory;
+                this.logHandle = logHandle;
             }
 
             public unsafe void Callback(IAsyncResult result)
             {
+                uint errorCode = 0;
+                try
+                {
+                    logHandle.EndWrite(result);
+                }
+                catch
+                {
+                    errorCode = 1;
+                }
+                        
                 memory.Return();
                 Overlapped ov = new Overlapped(0, 0, IntPtr.Zero, asyncResult);
-                callback(0, 0, ov.UnsafePack(callback, IntPtr.Zero));
+                callback(errorCode, 0, ov.UnsafePack(callback, IntPtr.Zero));
             }
         }
 
@@ -107,7 +170,7 @@ namespace FASTER.core
             var memory = pool.Get((int)readLength);
             logHandle.Seek((long)sourceAddress, SeekOrigin.Begin);
             logHandle.BeginRead(memory.buffer, 0, (int)readLength,
-                new ReadCallbackWrapper(callback, asyncResult, memory, destinationAddress, readLength).Callback, null);
+                new ReadCallbackWrapper(logHandle, callback, asyncResult, memory, destinationAddress, readLength).Callback, null);
         }
 
         /// <summary>
@@ -135,24 +198,32 @@ namespace FASTER.core
             }
             logHandle.Seek((long)destinationAddress, SeekOrigin.Begin);
             logHandle.BeginWrite(memory.buffer, 0, (int)numBytesToWrite,
-                new WriteCallbackWrapper(callback, asyncResult, memory).Callback, null);
+                new WriteCallbackWrapper(logHandle, callback, asyncResult, memory).Callback, null);
         }
 
         /// <summary>
-        /// 
+        /// <see cref="IDevice.RemoveSegment(int)"/>
         /// </summary>
-        /// <param name="fromSegment"></param>
-        /// <param name="toSegment"></param>
-        public override void DeleteSegmentRange(int fromSegment, int toSegment)
+        /// <param name="segment"></param>
+        public override void RemoveSegment(int segment)
         {
-            for (int i=fromSegment; i<toSegment; i++)
+            if (logHandles.TryRemove(segment, out Stream logHandle))
             {
-                if (logHandles.TryRemove(i, out Stream logHandle))
-                {
-                    logHandle.Dispose();
-                    File.Delete(GetSegmentName(i));
-                }
+                logHandle.Dispose();
+                File.Delete(GetSegmentName(segment));
             }
+        }
+
+        /// <summary>
+        /// <see cref="IDevice.RemoveSegmentAsync(int, AsyncCallback, IAsyncResult)"/>
+        /// </summary>
+        /// <param name="segment"></param>
+        /// <param name="callback"></param>
+        /// <param name="result"></param>
+        public override void RemoveSegmentAsync(int segment, AsyncCallback callback, IAsyncResult result)
+        {
+            RemoveSegment(segment);
+            callback(result);
         }
 
         /// <summary>

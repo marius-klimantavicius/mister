@@ -109,7 +109,7 @@ namespace Marius.Mister
             }
         }
 
-        public void Checkpoint()
+        public virtual void Checkpoint()
         {
             using (var handle = new AutoResetEvent(false))
             {
@@ -122,7 +122,7 @@ namespace Marius.Mister
             }
         }
 
-        public Task CheckpointAsync()
+        public virtual Task CheckpointAsync()
         {
             var tsc = new TaskCompletionSource<MisterVoid>(TaskCreationOptions.RunContinuationsAsynchronously);
             _maintenanceQueue.Enqueue(new MisterMaintenanceItem(tsc));
@@ -135,7 +135,13 @@ namespace Marius.Mister
 
         protected virtual int Maintain()
         {
-            PerformCheckpoint();
+            var newCheckpoint = Volatile.Read(ref _checkpointVersion);
+            if (newCheckpoint != 0)
+            {
+                PerformCompaction();
+                PerformCheckpoint();
+            }
+
             return _checkpointIntervalMilliseconds;
         }
 
@@ -209,6 +215,23 @@ namespace Marius.Mister
 
             lock (_maintenanceQueue)
                 Monitor.Pulse(_maintenanceQueue);
+        }
+
+        private void PerformCompaction()
+        {
+            try
+            {
+                _faster.StartSession();
+                _faster.Log.Compact(_faster.Log.SafeReadOnlyAddress);
+                IncrementVersion();
+            }
+            catch
+            {
+            }
+            finally
+            {
+                _faster.StopSession();
+            }
         }
 
         private bool TryRecover(Func<TFaster> create, FileInfo checkpointTokenFile)
@@ -310,6 +333,7 @@ namespace Marius.Mister
             try
             {
                 Volatile.Write(ref _isRunning, 1);
+                Interlocked.MemoryBarrier();
 
                 while (!_cancellationTokenSource.IsCancellationRequested)
                 {

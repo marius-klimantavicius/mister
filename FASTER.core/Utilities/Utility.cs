@@ -121,7 +121,6 @@ namespace FASTER.core
             return (long)Rotr64((ulong)local_rand_hash, 45);
         }
 
-
         /// <summary>
         /// Get 64-bit hash code for a byte array
         /// </summary>
@@ -147,7 +146,42 @@ namespace FASTER.core
 
             return (long)Rotr64(magicno * hashState, 4);
         }
-    
+
+        /// <summary>
+        /// Compute XOR of all provided bytes
+        /// </summary>
+        /// <param name="src"></param>
+        /// <param name="length"></param>
+        /// <returns></returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static unsafe ulong XorBytes(byte* src, int length)
+        {
+            ulong result = 0;
+            byte* curr = src;
+            byte* end = src + length;
+            while (curr + 4 * sizeof(ulong) <= end)
+            {
+                result ^= *(ulong*)curr;
+                result ^= *(1 + (ulong*)curr);
+                result ^= *(2 + (ulong*)curr);
+                result ^= *(3 + (ulong*)curr);
+                curr += 4 * sizeof(ulong);
+            }
+            while (curr + sizeof(ulong) <= end)
+            {
+                result ^= *(ulong*)curr;
+                curr += sizeof(ulong);
+            }
+            while (curr + 1 <= end)
+            {
+                result ^= *curr;
+                curr++;
+            }
+
+            return result;
+        }
+
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static ulong Rotr64(ulong x, int n)
         {
@@ -223,5 +257,40 @@ namespace FASTER.core
             a ^= a >> 16;
             return (int)a;
         }
+
+        /// <summary>
+        /// Updates the variable to newValue only if the current value is smaller than the new value.
+        /// </summary>
+        /// <param name="variable">The variable to possibly replace</param>
+        /// <param name="newValue">The value that replaces the variable if successful</param>
+        /// <param name="oldValue">The orignal value in the variable</param>
+        /// <returns> if oldValue less than newValue </returns>
+        public static bool MonotonicUpdate(ref long variable, long newValue, out long oldValue)
+        {
+            do
+            {
+                oldValue = variable;
+                if (oldValue >= newValue) return false;
+            } while (Interlocked.CompareExchange(ref variable, newValue, oldValue) != oldValue);
+            return true;
+        }
+
+        /// <summary>
+        /// Updates the variable to newValue only if the current value is smaller than the new value.
+        /// </summary>
+        /// <param name="variable">The variable to possibly replace</param>
+        /// <param name="newValue">The value that replaces the variable if successful</param>
+        /// <param name="oldValue">The orignal value in the variable</param>
+        /// <returns>if oldValue less than or equal to newValue</returns>
+        public static bool MonotonicUpdate(ref int variable, int newValue, out int oldValue)
+        {
+            do
+            {
+                oldValue = variable;
+                if (oldValue >= newValue) return false;
+            } while (Interlocked.CompareExchange(ref variable, newValue, oldValue) != oldValue);
+            return true;
+        }
+
     }
 }

@@ -58,8 +58,18 @@
       <HintPath>packages\System.Buffers.4.5.0\lib\netstandard2.0\System.Buffers.dll</HintPath>
     </Reference>
     <Reference Include="System.Core" />
-    <Reference Include="System.Runtime.CompilerServices.Unsafe, Version=4.0.4.1, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
-      <HintPath>packages\System.Runtime.CompilerServices.Unsafe.4.5.2\lib\netstandard2.0\System.Runtime.CompilerServices.Unsafe.dll</HintPath>
+    <Reference Include="System.Memory, Version=4.0.1.1, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
+      <HintPath>packages\System.Memory.4.5.3\lib\netstandard2.0\System.Memory.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Numerics" />
+    <Reference Include="System.Numerics.Vectors, Version=4.1.4.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
+      <HintPath>packages\System.Numerics.Vectors.4.5.0\lib\net46\System.Numerics.Vectors.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Runtime.CompilerServices.Unsafe, Version=4.0.5.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
+      <HintPath>packages\System.Runtime.CompilerServices.Unsafe.4.6.0\lib\netstandard2.0\System.Runtime.CompilerServices.Unsafe.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Threading.Tasks.Extensions, Version=4.2.0.1, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
+      <HintPath>packages\System.Threading.Tasks.Extensions.4.5.3\lib\netstandard2.0\System.Threading.Tasks.Extensions.dll</HintPath>
     </Reference>
     <Reference Include="System.Xml.Linq" />
     <Reference Include="System.Data.DataSetExtensions" />
@@ -71,14 +81,17 @@
   <ItemGroup>
     <Compile Include="FASTER.core\Allocator\AllocatorBase.cs" />
     <Compile Include="FASTER.core\Allocator\AsyncIOContext.cs" />
+    <Compile Include="FASTER.core\Allocator\AtomicOwner.cs" />
     <Compile Include="FASTER.core\Allocator\BlittableAllocator.cs" />
     <Compile Include="FASTER.core\Allocator\BlittableFrame.cs" />
     <Compile Include="FASTER.core\Allocator\BlittableScanIterator.cs" />
+    <Compile Include="FASTER.core\Allocator\ErrorList.cs" />
     <Compile Include="FASTER.core\Allocator\GenericAllocator.cs" />
     <Compile Include="FASTER.core\Allocator\GenericFrame.cs" />
     <Compile Include="FASTER.core\Allocator\GenericScanIterator.cs" />
     <Compile Include="FASTER.core\Allocator\IFasterScanIterator.cs" />
     <Compile Include="FASTER.core\Allocator\MallocFixedPageSize.cs" />
+    <Compile Include="FASTER.core\Allocator\PendingFlushList.cs" />
     <Compile Include="FASTER.core\Allocator\VarLenBlittableAllocator.cs" />
     <Compile Include="FASTER.core\Allocator\VarLenBlittableScanIterator.cs" />
     <Compile Include="FASTER.core\Device\Devices.cs" />
@@ -86,7 +99,9 @@
     <Compile Include="FASTER.core\Device\LocalStorageDevice.cs" />
     <Compile Include="FASTER.core\Device\ManagedLocalStorageDevice.cs" />
     <Compile Include="FASTER.core\Device\NullDevice.cs" />
+    <Compile Include="FASTER.core\Device\ShardedStorageDevice.cs" />
     <Compile Include="FASTER.core\Device\StorageDeviceBase.cs" />
+    <Compile Include="FASTER.core\Device\TieredStorageDevice.cs" />
     <Compile Include="FASTER.core\Epochs\FastThreadLocal.cs" />
     <Compile Include="FASTER.core\Epochs\LightEpoch.cs" />
     <Compile Include="FASTER.core\Index\Common\AddressInfo.cs" />
@@ -95,6 +110,15 @@
     <Compile Include="FASTER.core\Index\Common\HeapContainer.cs" />
     <Compile Include="FASTER.core\Index\Common\LogSettings.cs" />
     <Compile Include="FASTER.core\Index\Common\RecordInfo.cs" />
+    <Compile Include="FASTER.core\Index\FasterLog\CommitFailureException.cs" />
+    <Compile Include="FASTER.core\Index\FasterLog\CommitInfo.cs" />
+    <Compile Include="FASTER.core\Index\FasterLog\FasterLog.cs" />
+    <Compile Include="FASTER.core\Index\FasterLog\FasterLogIterator.cs" />
+    <Compile Include="FASTER.core\Index\FasterLog\FasterLogRecoveryInfo.cs" />
+    <Compile Include="FASTER.core\Index\FasterLog\FasterLogSettings.cs" />
+    <Compile Include="FASTER.core\Index\FasterLog\ILogCommitManager.cs" />
+    <Compile Include="FASTER.core\Index\FasterLog\IReadOnlySpanBatch.cs" />
+    <Compile Include="FASTER.core\Index\FasterLog\LocalLogCommitManager.cs" />
     <Compile Include="FASTER.core\Index\FASTER\Extensions.cs" />
     <Compile Include="FASTER.core\Index\FASTER\FASTER.cs" />
     <Compile Include="FASTER.core\Index\FASTER\FASTERBase.cs" />
@@ -123,6 +147,8 @@
     <Compile Include="FASTER.core\Utilities\Status.cs" />
     <Compile Include="FASTER.core\Utilities\Utility.cs" />
     <Compile Include="IMisterConnection.cs" />
+    <Compile Include="IMisterNotifyCompletion.cs" />
+    <Compile Include="IMisterNotifyCompletion1.cs" />
     <Compile Include="IMisterObjectSerializer.cs" />
     <Compile Include="IMisterAtomSource.cs" />
     <Compile Include="IMisterStreamManager.cs" />
@@ -144,6 +170,7 @@
     <Compile Include="MisterStreamSerializer.cs" />
     <Compile Include="MisterStreamStringSerializer.cs" />
     <Compile Include="MisterObjectStringSerializer.cs" />
+    <Compile Include="MisterThreadPoolAwaiter.cs" />
     <Compile Include="MisterVoid.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

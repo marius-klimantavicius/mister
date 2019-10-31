@@ -17,7 +17,7 @@ namespace Marius.Mister
         }
 
         public MisterArrayPoolStreamManager(int initialCapacity)
-            : this(ArrayPool<byte>.Shared, initialCapacity)
+            : this(ArrayPool<byte>.Create(1 << 20, 128), initialCapacity)
         {
 
         }

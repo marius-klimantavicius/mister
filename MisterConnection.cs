@@ -139,9 +139,31 @@ namespace Marius.Mister
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public Task CompactAsync()
+        public T FlushAsync<T>(T notifyCompletion, bool waitPending)
+            where T : class, IMisterNotifyCompletion
         {
-            return _underlyingConnection.CompactAsync();
+            return _underlyingConnection.FlushAsync(notifyCompletion, waitPending);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public T GetAsync<T>(TKey key, T notifyCompletion, bool waitPending)
+            where T : class, IMisterNotifyCompletion<TValue>
+        {
+            return _underlyingConnection.GetAsync(key, notifyCompletion, waitPending);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public T SetAsync<T>(TKey key, TValue value, T notifyCompletion, bool waitPending)
+            where T : class, IMisterNotifyCompletion
+        {
+            return _underlyingConnection.SetAsync(key, value, notifyCompletion, waitPending);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public T DeleteAsync<T>(TKey key, T notifyCompletion, bool waitPending)
+            where T : class, IMisterNotifyCompletion
+        {
+            return _underlyingConnection.DeleteAsync(key, notifyCompletion, waitPending);
         }
     }
 
@@ -219,6 +241,13 @@ namespace Marius.Mister
             public object State;
         }
 
+        private readonly MisterWorkAction _performGet;
+        private readonly MisterWorkAction _performSet;
+        private readonly MisterWorkAction _performDelete;
+        private readonly MisterWorkAction _performAction;
+        private readonly MisterWorkAction _performForEach;
+        private readonly MisterWorkAction _performFlush;
+
         protected readonly DirectoryInfo _directory;
         protected readonly IMisterSerializer<TKey, TKeyAtom, TKeyAtomSource> _keySerializer;
         protected readonly IMisterSerializer<TValue, TValueAtom, TValueAtomSource> _valueSerializer;
@@ -229,8 +258,10 @@ namespace Marius.Mister
         private readonly CancellationTokenSource _cancellationTokenSource;
         private bool _isClosed;
 
+        private object _lock = new object();
         private ConcurrentQueue<MisterWorkItem> _workQueue;
         private Thread[] _workerThreads;
+        private int _sessionsStarted;
 
         protected TFaster _faster;
         protected IDevice _mainDevice;
@@ -254,6 +285,13 @@ namespace Marius.Mister
             _cancellationTokenSource = new CancellationTokenSource();
 
             _maintenanceService = CreateMaintenanceService();
+
+            _performGet = PerformGet;
+            _performSet = PerformSet;
+            _performDelete = PerformDelete;
+            _performAction = PerformAction;
+            _performForEach = PerformForEach;
+            _performFlush = PerformFlush;
         }
 
         public void Close()
@@ -261,23 +299,26 @@ namespace Marius.Mister
             if (_isClosed)
                 return;
 
-            _isClosed = true;
+            lock (_lock)
+            {
+                _isClosed = true;
 
-            _cancellationTokenSource.Cancel();
+                _cancellationTokenSource.Cancel();
 
-            lock (_workQueue)
-                Monitor.PulseAll(_workQueue);
+                lock (_workQueue)
+                    Monitor.PulseAll(_workQueue);
 
-            _maintenanceService.Stop();
+                _maintenanceService.Stop();
 
-            for (var i = 0; i < _workerThreads.Length; i++)
-                _workerThreads[i].Join();
+                for (var i = 0; i < _workerThreads.Length; i++)
+                    _workerThreads[i].Join();
 
-            _maintenanceService.Close();
+                _maintenanceService.Close();
 
-            _faster.Dispose();
-            _mainDevice.Close();
-            _cancellationTokenSource.Dispose();
+                _faster.Dispose();
+                _mainDevice.Close();
+                _cancellationTokenSource.Dispose();
+            }
         }
 
         public void Checkpoint()
@@ -287,24 +328,6 @@ namespace Marius.Mister
             _maintenanceService.Checkpoint();
         }
 
-        public Task FlushAsync(bool waitPending)
-        {
-            CheckDisposed();
-
-            var tsc = new TaskCompletionSource<MisterVoid>(TaskCreationOptions.RunContinuationsAsynchronously);
-            _workQueue.Enqueue(new MisterWorkItem()
-            {
-                Action = PerformFlush,
-                State = tsc,
-                WaitPending = waitPending,
-            });
-
-            lock (_workQueue)
-                Monitor.Pulse(_workQueue);
-
-            return tsc.Task;
-        }
-
         public Task CheckpointAsync()
         {
             CheckDisposed();
@@ -312,117 +335,99 @@ namespace Marius.Mister
             return _maintenanceService.CheckpointAsync();
         }
 
-        public Task<TValue> GetAsync(TKey key)
+        public async Task FlushAsync(bool waitPending)
         {
-            CheckDisposed();
-
-            var tsc = new TaskCompletionSource<TValue>(TaskCreationOptions.RunContinuationsAsynchronously);
-            _workQueue.Enqueue(new MisterWorkItem()
-            {
-                Key = key,
-                State = tsc,
-                Action = PerformGet,
-            });
-
-            lock (_workQueue)
-                Monitor.Pulse(_workQueue);
-
-            return tsc.Task;
+            await FlushAsync(new MisterThreadPoolAwaiter(), waitPending);
         }
 
-        public Task<TValue> GetAsync(TKey key, bool waitPending)
+        public async Task<TValue> GetAsync(TKey key, bool waitPending = false)
+        {
+            return await GetAsync(key, new MisterThreadPoolAwaiter<TValue>(), waitPending);
+        }
+
+        public async Task SetAsync(TKey key, TValue value, bool waitPending = false)
+        {
+            await SetAsync(key, value, new MisterThreadPoolAwaiter(), waitPending);
+        }
+
+        public async Task DeleteAsync(TKey key, bool waitPending = false)
+        {
+            await DeleteAsync(key, new MisterThreadPoolAwaiter(), waitPending);
+        }
+
+        public T FlushAsync<T>(T notifyCompletion, bool waitPending)
+            where T : class, IMisterNotifyCompletion
         {
             CheckDisposed();
 
-            var tsc = new TaskCompletionSource<TValue>(TaskCreationOptions.RunContinuationsAsynchronously);
             _workQueue.Enqueue(new MisterWorkItem()
             {
-                Key = key,
-                State = tsc,
-                Action = PerformGet,
+                Action = _performFlush,
+                State = notifyCompletion,
                 WaitPending = waitPending,
             });
 
             lock (_workQueue)
                 Monitor.Pulse(_workQueue);
 
-            return tsc.Task;
+            return notifyCompletion;
         }
 
-        public Task SetAsync(TKey key, TValue value)
+        public T GetAsync<T>(TKey key, T notifyCompletion, bool waitPending = false)
+            where T : class, IMisterNotifyCompletion<TValue>
         {
             CheckDisposed();
 
-            var tsc = new TaskCompletionSource<MisterVoid>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _workQueue.Enqueue(new MisterWorkItem()
+            {
+                Key = key,
+                Action = _performGet,
+                State = notifyCompletion,
+                WaitPending = waitPending,
+            });
+
+            lock (_workQueue)
+                Monitor.Pulse(_workQueue);
+
+            return notifyCompletion;
+        }
+
+        public T SetAsync<T>(TKey key, TValue value, T notifyCompletion, bool waitPending = false)
+            where T : class, IMisterNotifyCompletion
+        {
+            CheckDisposed();
+
             _workQueue.Enqueue(new MisterWorkItem()
             {
                 Key = key,
                 Value = value,
-                State = tsc,
-                Action = PerformSet,
+                Action = _performSet,
+                State = notifyCompletion,
             });
 
             lock (_workQueue)
                 Monitor.Pulse(_workQueue);
 
-            return tsc.Task;
+            return notifyCompletion;
         }
 
-        public Task SetAsync(TKey key, TValue value, bool waitPending)
+        public T DeleteAsync<T>(TKey key, T notifyCompletion, bool waitPending = false)
+            where T : class, IMisterNotifyCompletion
         {
             CheckDisposed();
 
-            var tsc = new TaskCompletionSource<MisterVoid>(TaskCreationOptions.RunContinuationsAsynchronously);
             _workQueue.Enqueue(new MisterWorkItem()
             {
                 Key = key,
-                Value = value,
-                State = tsc,
+                Action = _performDelete,
+                State = notifyCompletion,
                 WaitPending = waitPending,
-                Action = PerformSet,
             });
 
             lock (_workQueue)
                 Monitor.Pulse(_workQueue);
 
-            return tsc.Task;
-        }
-
-        public Task DeleteAsync(TKey key)
-        {
-            CheckDisposed();
-
-            var tsc = new TaskCompletionSource<MisterVoid>(TaskCreationOptions.RunContinuationsAsynchronously);
-            _workQueue.Enqueue(new MisterWorkItem()
-            {
-                Key = key,
-                State = tsc,
-                Action = PerformDelete,
-            });
-
-            lock (_workQueue)
-                Monitor.Pulse(_workQueue);
-
-            return tsc.Task;
-        }
-
-        public Task DeleteAsync(TKey key, bool waitPending)
-        {
-            CheckDisposed();
-
-            var tsc = new TaskCompletionSource<MisterVoid>(TaskCreationOptions.RunContinuationsAsynchronously);
-            _workQueue.Enqueue(new MisterWorkItem()
-            {
-                Key = key,
-                State = tsc,
-                WaitPending = waitPending,
-                Action = PerformDelete,
-            });
-
-            lock (_workQueue)
-                Monitor.Pulse(_workQueue);
-
-            return tsc.Task;
+            return notifyCompletion;
         }
 
         public void ForEach(Action<TKey, TValue, bool, object> onRecord, Action<object> onCompleted = null, object state = default(object))
@@ -434,7 +439,7 @@ namespace Marius.Mister
 
             _workQueue.Enqueue(new MisterWorkItem()
             {
-                Action = PerformForEach,
+                Action = _performForEach,
                 State = new MisterForEachItem()
                 {
                     OnRecord = onRecord,
@@ -445,23 +450,6 @@ namespace Marius.Mister
 
             lock (_workQueue)
                 Monitor.Pulse(_workQueue);
-        }
-
-        public Task CompactAsync()
-        {
-            CheckDisposed();
-
-            var tcs = new TaskCompletionSource<MisterVoid>(TaskCreationOptions.RunContinuationsAsynchronously);
-            _workQueue.Enqueue(new MisterWorkItem()
-            {
-                Action = PerformCompact,
-                State = tcs,
-            });
-
-            lock (_workQueue)
-                Monitor.Pulse(_workQueue);
-
-            return tcs.Task;
         }
 
         protected abstract void Create();
@@ -479,22 +467,28 @@ namespace Marius.Mister
                 return _faster;
             });
 
-            _workQueue = new ConcurrentQueue<MisterWorkItem>();
-            _workerThreads = new Thread[_settings.WorkerThreadCount];
-            for (var i = 0; i < _workerThreads.Length; i++)
-                _workerThreads[i] = new Thread(WorkerLoop) { IsBackground = true, Name = $"{_name ?? "Mister"} worker thread #{i + 1}" };
+            lock (_lock)
+            {
+                _workQueue = new ConcurrentQueue<MisterWorkItem>();
+                _workerThreads = new Thread[_settings.WorkerThreadCount];
+                for (var i = 0; i < _workerThreads.Length; i++)
+                    _workerThreads[i] = new Thread(WorkerLoop) { IsBackground = true, Name = $"{_name ?? "Mister"} worker thread #{i + 1}" };
 
-            for (var i = 0; i < _workerThreads.Length; i++)
-                _workerThreads[i].Start(i.ToString());
+                for (var i = 0; i < _workerThreads.Length; i++)
+                    _workerThreads[i].Start(i.ToString());
 
-            _maintenanceService.Start();
+                while (Volatile.Read(ref _sessionsStarted) < _workerThreads.Length)
+                    Thread.Yield();
+
+                _maintenanceService.Start();
+            }
         }
 
         protected void Execute(Action<long> action)
         {
             _workQueue.Enqueue(new MisterWorkItem()
             {
-                Action = PerformAction,
+                Action = _performAction,
                 State = action,
             });
 
@@ -528,7 +522,7 @@ namespace Marius.Mister
 
                 if (state != null)
                 {
-                    var tsc = Unsafe.As<TaskCompletionSource<TValue>>(state);
+                    var tsc = Unsafe.As<IMisterNotifyCompletion<TValue>>(state);
                     if (status == Status.ERROR)
                         tsc.SetException(new Exception());
                     else
@@ -541,7 +535,7 @@ namespace Marius.Mister
 
                 if (state != null)
                 {
-                    var tsc = (TaskCompletionSource<TValue>)state;
+                    var tsc = Unsafe.As<IMisterNotifyCompletion<TValue>>(state);
                     tsc.SetException(ex);
                 }
             }
@@ -577,11 +571,11 @@ namespace Marius.Mister
 
                 if (state != null)
                 {
-                    var tsc = Unsafe.As<TaskCompletionSource<MisterVoid>>(state);
+                    var tsc = Unsafe.As<IMisterNotifyCompletion>(state);
                     if (status == Status.ERROR)
                         tsc.SetException(new Exception());
                     else
-                        tsc.SetResult(MisterVoid.Value);
+                        tsc.SetResult();
                 }
             }
             catch (Exception ex)
@@ -590,7 +584,7 @@ namespace Marius.Mister
 
                 if (state != null)
                 {
-                    var tsc = (TaskCompletionSource<MisterVoid>)state;
+                    var tsc = Unsafe.As<IMisterNotifyCompletion>(state);
                     tsc.SetException(ex);
                 }
             }
@@ -623,11 +617,11 @@ namespace Marius.Mister
 
                 if (state != null)
                 {
-                    var tsc = Unsafe.As<TaskCompletionSource<MisterVoid>>(state);
+                    var tsc = Unsafe.As<IMisterNotifyCompletion>(state);
                     if (status == Status.ERROR)
                         tsc.SetException(new Exception());
                     else
-                        tsc.SetResult(MisterVoid.Value);
+                        tsc.SetResult();
                 }
             }
             catch (Exception ex)
@@ -636,7 +630,7 @@ namespace Marius.Mister
 
                 if (state != null)
                 {
-                    var tsc = (TaskCompletionSource<MisterVoid>)state;
+                    var tsc = Unsafe.As<IMisterNotifyCompletion>(state);
                     tsc.SetException(ex);
                 }
             }
@@ -656,8 +650,8 @@ namespace Marius.Mister
 
                 if (state != null)
                 {
-                    var tsc = Unsafe.As<TaskCompletionSource<MisterVoid>>(state);
-                    tsc.SetResult(MisterVoid.Value);
+                    var tsc = Unsafe.As<IMisterNotifyCompletion>(state);
+                    tsc.SetResult();
                 }
             }
             catch (Exception ex)
@@ -666,7 +660,7 @@ namespace Marius.Mister
 
                 if (state != null)
                 {
-                    var tsc = (TaskCompletionSource<MisterVoid>)state;
+                    var tsc = Unsafe.As<IMisterNotifyCompletion>(state);
                     tsc.SetException(ex);
                 }
             }
@@ -696,39 +690,11 @@ namespace Marius.Mister
             return true;
         }
 
-        private bool PerformCompact(ref MisterWorkItem workItem, long sequence)
-        {
-            var state = workItem.State;
-            try
-            {
-                _faster.Log.Compact(_faster.Log.SafeReadOnlyAddress);
-                _maintenanceService.IncrementVersion();
-
-                if (state != null)
-                {
-                    var tsc = Unsafe.As<TaskCompletionSource<MisterVoid>>(state);
-                    tsc.SetResult(MisterVoid.Value);
-                }
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex);
-
-                if (state != null)
-                {
-                    var tsc = (TaskCompletionSource<MisterVoid>)state;
-                    tsc.SetException(ex);
-                }
-            }
-
-            return false;
-        }
-
         private bool PerformAction(ref MisterWorkItem workItem, long sequence)
         {
             try
             {
-                var action = Unsafe.As<Action<long>>(workItem.State);
+                var action = (Action<long>)(workItem.State);
                 action(sequence);
             }
             catch { }
@@ -745,12 +711,16 @@ namespace Marius.Mister
 
         private void WorkerLoop(object state)
         {
+            var hasSessionStarted = false;
             try
             {
                 var workerRefreshIntervalMilliseconds = _settings.WorkerRefreshIntervalMilliseconds;
                 var sequence = 0L;
                 var session = _faster.StartSession();
                 var hasPending = false;
+
+                hasSessionStarted = true;
+                Interlocked.Increment(ref _sessionsStarted);
 
                 while (!_cancellationTokenSource.IsCancellationRequested)
                 {
@@ -792,6 +762,7 @@ namespace Marius.Mister
 
                     if (needRefresh)
                     {
+                        _faster.CompletePending(false);
                         _faster.Refresh();
                     }
                 }
@@ -802,17 +773,33 @@ namespace Marius.Mister
                 Trace.Write(ex);
             }
 
-            while (_maintenanceService.IsRunning)
+            if (!hasSessionStarted)
+                return;
+
+            try
             {
-                _faster.Refresh();
-                _faster.CompletePending(true);
-                Thread.Sleep(10);
+                while (_maintenanceService.IsRunning)
+                {
+                    _faster.Refresh();
+                    _faster.CompletePending(true);
+                    Thread.Sleep(10);
+                }
+
+                while (!_faster.CompletePending(true))
+                    _faster.Refresh();
             }
-
-            while (!_faster.CompletePending(true))
-                _faster.Refresh();
-
-            _faster.StopSession();
+            finally
+            {
+                try
+                {
+                    _faster.StopSession();
+                }
+                catch (Exception ex)
+                {
+                    Log.Error(ex);
+                    Trace.Write(ex);
+                }
+            }
         }
     }
 }
