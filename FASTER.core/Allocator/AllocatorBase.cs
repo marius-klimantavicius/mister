@@ -2,11 +2,10 @@
 // Licensed under the MIT license.
 
 using System;
-using System.Runtime.CompilerServices;
-using System.Threading;
-using System.Runtime.InteropServices;
 using System.Diagnostics;
-using System.Collections.Generic;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Threading;
 
 namespace FASTER.core
 {
@@ -183,6 +182,11 @@ namespace FASTER.core
         /// Global address of the current tail (next element to be allocated from the circular buffer) 
         /// </summary>
         private PageOffset TailPageOffset;
+
+        /// <summary>
+        /// Whether log is disposed
+        /// </summary>
+        private bool disposed = false;
 
         /// <summary>
         /// Number of pending reads
@@ -586,6 +590,8 @@ namespace FASTER.core
         /// </summary>
         public virtual void Dispose()
         {
+            disposed = true;
+
             TailPageOffset.Page = 0;
             TailPageOffset.Offset = 0;
             SafeReadOnlyAddress = 0;
@@ -1251,7 +1257,7 @@ namespace FASTER.core
                     asyncResult.maxPtr = readLength;
                     readLength = (uint)((readLength + (sectorSize - 1)) & ~(sectorSize - 1));
                 }
-                
+
                 if (device != null)
                     offsetInFile = (ulong)(AlignedPageSizeBytes * (readPage - devicePageOffset));
 
@@ -1272,7 +1278,7 @@ namespace FASTER.core
             int numPages = (int)(endPage - startPage);
 
             long offsetInStartPage = GetOffsetInPage(fromAddress);
-            long offsetInEndPage = GetOffsetInPage(untilAddress);                
+            long offsetInEndPage = GetOffsetInPage(untilAddress);
 
             // Extra (partial) page being flushed
             if (offsetInEndPage > 0)
@@ -1479,41 +1485,38 @@ namespace FASTER.core
         /// <param name="overlap"></param>
         private void AsyncFlushPageCallback(uint errorCode, uint numBytes, NativeOverlapped* overlap)
         {
-            if (errorCode != 0)
-            {
-                Trace.TraceError("OverlappedStream GetQueuedCompletionStatus error: {0}", errorCode);
-            }
-
-            /*
-            if (DateTime.Now - last > TimeSpan.FromSeconds(7))
-            {
-                last = DateTime.Now;
-                errorCode = 1;
-                Console.WriteLine("Disk error");
-            }*/
-            
-
-            // Set the page status to flushed
-            PageAsyncFlushResult<Empty> result = (PageAsyncFlushResult<Empty>)Overlapped.Unpack(overlap).AsyncResult;
-
-            if (Interlocked.Decrement(ref result.count) == 0)
+            try
             {
                 if (errorCode != 0)
                 {
-                    errorList.Add(result.fromAddress);
+                    Trace.TraceError("OverlappedStream GetQueuedCompletionStatus error: {0}", errorCode);
                 }
-                Utility.MonotonicUpdate(ref PageStatusIndicator[result.page % BufferSize].LastFlushedUntilAddress, result.untilAddress, out _);
-                ShiftFlushedUntilAddress();
-                result.Free();
-            }
 
-            var _flush = FlushedUntilAddress;
-            if (GetOffsetInPage(_flush) > 0 && PendingFlush[GetPage(_flush) % BufferSize].RemoveAdjacent(_flush, out PageAsyncFlushResult<Empty> request))
+                // Set the page status to flushed
+                PageAsyncFlushResult<Empty> result = (PageAsyncFlushResult<Empty>)Overlapped.Unpack(overlap).AsyncResult;
+
+                if (Interlocked.Decrement(ref result.count) == 0)
+                {
+                    if (errorCode != 0)
+                    {
+                        errorList.Add(result.fromAddress);
+                    }
+                    Utility.MonotonicUpdate(ref PageStatusIndicator[result.page % BufferSize].LastFlushedUntilAddress, result.untilAddress, out _);
+                    ShiftFlushedUntilAddress();
+                    result.Free();
+                }
+
+                var _flush = FlushedUntilAddress;
+                if (GetOffsetInPage(_flush) > 0 && PendingFlush[GetPage(_flush) % BufferSize].RemoveAdjacent(_flush, out PageAsyncFlushResult<Empty> request))
+                {
+                    WriteAsync(request.fromAddress >> LogPageSizeBits, AsyncFlushPageCallback, request);
+                }
+            }
+            catch when (disposed) { }
+            finally
             {
-                WriteAsync(request.fromAddress >> LogPageSizeBits, AsyncFlushPageCallback, request);
+                Overlapped.Free(overlap);
             }
-
-            Overlapped.Free(overlap);
         }
 
         /// <summary>
@@ -1524,18 +1527,25 @@ namespace FASTER.core
         /// <param name="overlap"></param>
         private void AsyncFlushPageToDeviceCallback(uint errorCode, uint numBytes, NativeOverlapped* overlap)
         {
-            if (errorCode != 0)
+            try
             {
-                Trace.TraceError("OverlappedStream GetQueuedCompletionStatus error: {0}", errorCode);
+                if (errorCode != 0)
+                {
+                    Trace.TraceError("OverlappedStream GetQueuedCompletionStatus error: {0}", errorCode);
+                }
+
+                PageAsyncFlushResult<Empty> result = (PageAsyncFlushResult<Empty>)Overlapped.Unpack(overlap).AsyncResult;
+
+                if (Interlocked.Decrement(ref result.count) == 0)
+                {
+                    result.Free();
+                }
             }
-
-            PageAsyncFlushResult<Empty> result = (PageAsyncFlushResult<Empty>)Overlapped.Unpack(overlap).AsyncResult;
-
-            if (Interlocked.Decrement(ref result.count) == 0)
+            catch when (disposed) { }
+            finally
             {
-                result.Free();
+                Overlapped.Free(overlap);
             }
-            Overlapped.Free(overlap);
         }
 
         /// <summary>
