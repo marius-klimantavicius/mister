@@ -95,6 +95,7 @@
     <Compile Include="FASTER.core\Allocator\VarLenBlittableAllocator.cs" />
     <Compile Include="FASTER.core\Allocator\VarLenBlittableScanIterator.cs" />
     <Compile Include="FASTER.core\Device\Devices.cs" />
+    <Compile Include="FASTER.core\Device\FixedPool.cs" />
     <Compile Include="FASTER.core\Device\IDevice.cs" />
     <Compile Include="FASTER.core\Device\LocalStorageDevice.cs" />
     <Compile Include="FASTER.core\Device\ManagedLocalStorageDevice.cs" />

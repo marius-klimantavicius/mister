@@ -573,7 +573,7 @@ namespace FASTER.core
         public void Acquire()
         {
             if (ownedEpoch)
-                epoch.Acquire();
+                epoch.Resume();
         }
 
         /// <summary>
@@ -582,7 +582,7 @@ namespace FASTER.core
         public void Release()
         {
             if (ownedEpoch)
-                epoch.Release();
+                epoch.Suspend();
         }
 
         /// <summary>
@@ -591,14 +591,6 @@ namespace FASTER.core
         public virtual void Dispose()
         {
             disposed = true;
-
-            TailPageOffset.Page = 0;
-            TailPageOffset.Offset = 0;
-            SafeReadOnlyAddress = 0;
-            ReadOnlyAddress = 0;
-            SafeHeadAddress = 0;
-            HeadAddress = 0;
-            BeginAddress = 1;
 
             if (ownedEpoch)
                 epoch.Dispose();
@@ -1064,7 +1056,7 @@ namespace FASTER.core
 
             if (update)
             {
-                Utility.MonotonicUpdate(ref ClosedUntilAddress, currentClosedUntilAddress, out long oldClosedUntilAddress);
+                Utility.MonotonicUpdate(ref ClosedUntilAddress, currentClosedUntilAddress, out _);
             }
         }
 

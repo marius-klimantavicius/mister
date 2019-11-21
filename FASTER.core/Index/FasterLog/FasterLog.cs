@@ -4,6 +4,7 @@
 #pragma warning disable 0162
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -59,6 +60,18 @@ namespace FASTER.core
         internal Task<LinkedCommitInfo> CommitTask => commitTcs.Task;
 
         /// <summary>
+        /// Table of persisted iterators
+        /// </summary>
+        internal readonly ConcurrentDictionary<string, FasterLogScanIterator> PersistedIterators 
+            = new ConcurrentDictionary<string, FasterLogScanIterator>();
+
+        /// <summary>
+        /// Numer of references to log, including itself
+        /// Used to determine disposability of log
+        /// </summary>
+        internal int logRefCount = 1;
+
+        /// <summary>
         /// Create new log instance
         /// </summary>
         /// <param name="logSettings"></param>
@@ -88,9 +101,15 @@ namespace FASTER.core
         /// </summary>
         public void Dispose()
         {
+            if (Interlocked.Decrement(ref logRefCount) == 0)
+                TrueDispose();
+        }
+
+        internal void TrueDispose()
+        {
+            commitTcs.TrySetException(new ObjectDisposedException("Log has been disposed"));
             allocator.Dispose();
             epoch.Dispose();
-            commitTcs.TrySetException(new ObjectDisposedException("Log has been disposed"));
         }
 
         #region Enqueue
@@ -208,7 +227,8 @@ namespace FASTER.core
         /// Enqueue entry to log in memory (async) - completes after entry is 
         /// appended to memory, NOT committed to storage.
         /// </summary>
-        /// <param name="entry"></param>
+        /// <param name="entry">Entry to enqueue</param>
+        /// <param name="token">Cancellation token</param>
         /// <returns></returns>
         public ValueTask<long> EnqueueAsync(byte[] entry, CancellationToken token = default)
         {
@@ -245,7 +265,8 @@ namespace FASTER.core
         /// Enqueue entry to log in memory (async) - completes after entry is 
         /// appended to memory, NOT committed to storage.
         /// </summary>
-        /// <param name="entry"></param>
+        /// <param name="entry">Entry to enqueue</param>
+        /// <param name="token">Cancellation token</param>
         /// <returns></returns>
         public ValueTask<long> EnqueueAsync(ReadOnlyMemory<byte> entry, CancellationToken token = default)
         {
@@ -255,7 +276,7 @@ namespace FASTER.core
 
             return SlowEnqueueAsync(this, entry, token);
         }
-
+        
         private static async ValueTask<long> SlowEnqueueAsync(FasterLog @this, ReadOnlyMemory<byte> entry, CancellationToken token)
         {
             long logicalAddress;
@@ -282,7 +303,8 @@ namespace FASTER.core
         /// Enqueue batch of entries to log in memory (async) - completes after entry is 
         /// appended to memory, NOT committed to storage.
         /// </summary>
-        /// <param name="readOnlySpanBatch"></param>
+        /// <param name="readOnlySpanBatch">Batch to enqueue</param>
+        /// <param name="token">Cancellation token</param>
         /// <returns></returns>
         public ValueTask<long> EnqueueAsync(IReadOnlySpanBatch readOnlySpanBatch, CancellationToken token = default)
         {
@@ -339,6 +361,7 @@ namespace FASTER.core
         /// ensure that someone else causes the commit to happen.
         /// </summary>
         /// <param name="untilAddress">Address until which we should wait for commit, default 0 for tail of log</param>
+        /// <param name="token">Cancellation token</param>
         /// <returns></returns>
         public async ValueTask WaitForCommitAsync(long untilAddress = 0, CancellationToken token = default)
         {
@@ -473,7 +496,8 @@ namespace FASTER.core
         /// Append entry to log (async) - completes after entry is committed to storage.
         /// Does NOT itself issue flush!
         /// </summary>
-        /// <param name="entry"></param>
+        /// <param name="entry">Entry to enqueue</param>
+        /// <param name="token">Cancellation token</param>
         /// <returns></returns>
         public async ValueTask<long> EnqueueAndWaitForCommitAsync(byte[] entry, CancellationToken token = default)
         {
@@ -526,7 +550,8 @@ namespace FASTER.core
         /// Append entry to log (async) - completes after entry is committed to storage.
         /// Does NOT itself issue flush!
         /// </summary>
-        /// <param name="entry"></param>
+        /// <param name="entry">Entry to enqueue</param>
+        /// <param name="token">Cancellation token</param>
         /// <returns></returns>
         public async ValueTask<long> EnqueueAndWaitForCommitAsync(ReadOnlyMemory<byte> entry, CancellationToken token = default)
         {
@@ -580,6 +605,7 @@ namespace FASTER.core
         /// Does NOT itself issue flush!
         /// </summary>
         /// <param name="readOnlySpanBatch"></param>
+        /// <param name="token">Cancellation token</param>
         /// <returns></returns>
         public async ValueTask<long> EnqueueAndWaitForCommitAsync(IReadOnlySpanBatch readOnlySpanBatch, CancellationToken token = default)
         {
@@ -648,7 +674,7 @@ namespace FASTER.core
         /// <param name="untilAddress">Until address</param>
         public void TruncateUntilPageStart(long untilAddress)
         {
-            allocator.ShiftBeginAddress(untilAddress & allocator.PageSizeMask);
+            allocator.ShiftBeginAddress(untilAddress & ~allocator.PageSizeMask);
         }
 
         /// <summary>
@@ -672,11 +698,13 @@ namespace FASTER.core
             {
                 if (name.Length > 20)
                     throw new Exception("Max length of iterator name is 20 characters");
-                if (FasterLogScanIterator.PersistedIterators.ContainsKey(name))
+                if (PersistedIterators.ContainsKey(name))
                     Debug.WriteLine("Iterator name exists, overwriting");
-                FasterLogScanIterator.PersistedIterators[name] = iter;
+                PersistedIterators[name] = iter;
             }
 
+            if (Interlocked.Increment(ref logRefCount) == 1)
+                throw new Exception("Cannot scan disposed log instance");
             return iter;
         }
 
@@ -685,6 +713,7 @@ namespace FASTER.core
         /// </summary>
         /// <param name="address">Logical address to read from</param>
         /// <param name="estimatedLength">Estimated length of entry, if known</param>
+        /// <param name="token">Cancellation token</param>
         /// <returns></returns>
         public async ValueTask<(byte[], int)> ReadAsync(long address, int estimatedLength = 0, CancellationToken token = default)
         {
@@ -737,11 +766,16 @@ namespace FASTER.core
                     BeginAddress = commitInfo.BeginAddress,
                     FlushedUntilAddress = commitInfo.UntilAddress
                 };
-                info.PopulateIterators();
+
+                // Take snapshot of persisted iterators
+                info.SnapshotIterators(PersistedIterators);
 
                 logCommitManager.Commit(info.BeginAddress, info.FlushedUntilAddress, info.ToByteArray());
                 CommittedBeginAddress = info.BeginAddress;
                 CommittedUntilAddress = info.FlushedUntilAddress;
+                
+                // Update completed address for persisted iterators
+                info.CommitIterators(PersistedIterators);
 
                 _commitTcs = commitTcs;
                 // If task is not faulted, create new task
@@ -920,7 +954,7 @@ namespace FASTER.core
                 // May need to commit begin address and/or iterators
                 epoch.Suspend();
                 var beginAddress = allocator.BeginAddress;
-                if (beginAddress > CommittedBeginAddress || FasterLogScanIterator.PersistedIterators.Count > 0)
+                if (beginAddress > CommittedBeginAddress || PersistedIterators.Count > 0)
                     CommitCallback(new CommitInfo
                     {
                         BeginAddress = beginAddress,
