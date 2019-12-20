@@ -175,6 +175,7 @@ namespace Marius.Mister
             TKeyAtomSource,
             MisterObject,
             TValueAtomSource,
+            MisterObjectEnvironment<TValue, TValueAtomSource>,
             FasterKV<MisterObject, MisterObject, byte[], TValue, object, MisterObjectEnvironment<TValue, TValueAtomSource>>
         >
         where TKeyAtomSource : struct, IMisterAtomSource<MisterObject>
@@ -214,16 +215,17 @@ namespace Marius.Mister
         }
     }
 
-    public abstract class MisterConnection<TKey, TValue, TKeyAtom, TKeyAtomSource, TValueAtom, TValueAtomSource, TFaster> : IMisterConnection<TKey, TValue>
+    public abstract class MisterConnection<TKey, TValue, TKeyAtom, TKeyAtomSource, TValueAtom, TValueAtomSource, TFunctions, TFaster> : IMisterConnection<TKey, TValue>
         where TKeyAtom : new()
         where TValueAtom : new()
         where TKeyAtomSource : struct, IMisterAtomSource<TKeyAtom>
         where TValueAtomSource : struct, IMisterAtomSource<TValueAtom>
-        where TFaster : IFasterKV<TKeyAtom, TValueAtom, byte[], TValue, object>
+        where TFunctions: IFunctions<TKeyAtom, TValueAtom, byte[], TValue, object>
+        where TFaster : IFasterKV<TKeyAtom, TValueAtom, byte[], TValue, object, TFunctions>
     {
         private static readonly ILog Log = LogManager.GetLogger("MisterConnection");
 
-        private delegate bool MisterWorkAction(ref MisterWorkItem workItem, long sequence);
+        private delegate bool MisterWorkAction(ClientSession<TKeyAtom, TValueAtom, byte[], TValue, object, TFunctions> session, ref MisterWorkItem workItem, long sequence);
 
         private struct MisterWorkItem
         {
@@ -253,7 +255,7 @@ namespace Marius.Mister
         protected readonly IMisterSerializer<TValue, TValueAtom, TValueAtomSource> _valueSerializer;
         protected readonly MisterConnectionSettings _settings;
         protected readonly string _name;
-        protected readonly MisterConnectionMaintenanceService<TValue, TKeyAtom, TValueAtom, TFaster> _maintenanceService;
+        protected readonly MisterConnectionMaintenanceService<TValue, TKeyAtom, TValueAtom, TFunctions, TFaster> _maintenanceService;
 
         private readonly CancellationTokenSource _cancellationTokenSource;
         private bool _isClosed;
@@ -454,9 +456,9 @@ namespace Marius.Mister
 
         protected abstract void Create();
 
-        protected virtual MisterConnectionMaintenanceService<TValue, TKeyAtom, TValueAtom, TFaster> CreateMaintenanceService()
+        protected virtual MisterConnectionMaintenanceService<TValue, TKeyAtom, TValueAtom, TFunctions, TFaster> CreateMaintenanceService()
         {
-            return new MisterConnectionMaintenanceService<TValue, TKeyAtom, TValueAtom, TFaster>(_directory, _settings.CheckpointIntervalMilliseconds, _settings.CheckpointCleanCount, _name);
+            return new MisterConnectionMaintenanceService<TValue, TKeyAtom, TValueAtom, TFunctions, TFaster>(_directory, _settings.CheckpointIntervalMilliseconds, _settings.CheckpointCleanCount, _name);
         }
 
         protected void Initialize()
@@ -496,7 +498,7 @@ namespace Marius.Mister
                 Monitor.Pulse(_workQueue);
         }
 
-        private unsafe bool PerformGet(ref MisterWorkItem workItem, long sequence)
+        private unsafe bool PerformGet(ClientSession<TKeyAtom, TValueAtom, byte[], TValue, object, TFunctions> session, ref MisterWorkItem workItem, long sequence)
         {
             var status = default(Status);
             var key = workItem.Key;
@@ -511,11 +513,11 @@ namespace Marius.Mister
                 {
                     ref var misterKey = ref source.GetAtom();
 
-                    status = _faster.Read(ref misterKey, ref input, ref output, state, sequence);
+                    status = session.Read(ref misterKey, ref input, ref output, state, sequence);
                     if (status == Status.PENDING)
                     {
                         if (workItem.WaitPending)
-                            _faster.CompletePending(true);
+                            session.CompletePending(true);
                         return false;
                     }
                 }
@@ -543,7 +545,7 @@ namespace Marius.Mister
             return status != Status.PENDING;
         }
 
-        private unsafe bool PerformSet(ref MisterWorkItem workItem, long sequence)
+        private unsafe bool PerformSet(ClientSession<TKeyAtom, TValueAtom, byte[], TValue, object, TFunctions> session, ref MisterWorkItem workItem, long sequence)
         {
             var status = default(Status);
             var key = workItem.Key;
@@ -558,13 +560,13 @@ namespace Marius.Mister
                     ref var misterKey = ref keySource.GetAtom();
                     ref var misterValue = ref valueSource.GetAtom();
 
-                    status = _faster.Upsert(ref misterKey, ref misterValue, state, sequence);
+                    status = session.Upsert(ref misterKey, ref misterValue, state, sequence);
                     _maintenanceService.IncrementVersion();
 
                     if (status == Status.PENDING)
                     {
                         if (workItem.WaitPending)
-                            _faster.CompletePending(true);
+                            session.CompletePending(true);
                         return false;
                     }
                 }
@@ -592,7 +594,7 @@ namespace Marius.Mister
             return status != Status.PENDING;
         }
 
-        private unsafe bool PerformDelete(ref MisterWorkItem workItem, long sequence)
+        private unsafe bool PerformDelete(ClientSession<TKeyAtom, TValueAtom, byte[], TValue, object, TFunctions> session, ref MisterWorkItem workItem, long sequence)
         {
             var status = default(Status);
             var key = workItem.Key;
@@ -604,13 +606,13 @@ namespace Marius.Mister
                 {
                     ref var misterKey = ref keySource.GetAtom();
 
-                    status = _faster.Delete(ref misterKey, state, sequence);
+                    status = session.Delete(ref misterKey, state, sequence);
                     _maintenanceService.IncrementVersion();
 
                     if (status == Status.PENDING)
                     {
                         if (workItem.WaitPending)
-                            _faster.CompletePending(true);
+                            session.CompletePending(true);
                         return false;
                     }
                 }
@@ -638,7 +640,7 @@ namespace Marius.Mister
             return status != Status.PENDING;
         }
 
-        private bool PerformFlush(ref MisterWorkItem workItem, long sequence)
+        private bool PerformFlush(ClientSession<TKeyAtom, TValueAtom, byte[], TValue, object, TFunctions> session, ref MisterWorkItem workItem, long sequence)
         {
             var state = workItem.State;
             var wait = workItem.WaitPending;
@@ -668,7 +670,7 @@ namespace Marius.Mister
             return true;
         }
 
-        private unsafe bool PerformForEach(ref MisterWorkItem workItem, long sequence)
+        private unsafe bool PerformForEach(ClientSession<TKeyAtom, TValueAtom, byte[], TValue, object, TFunctions> session, ref MisterWorkItem workItem, long sequence)
         {
             var forEachItem = Unsafe.As<MisterForEachItem>(workItem.State);
             var iterator = _faster.Log.Scan(_faster.Log.BeginAddress, _faster.Log.TailAddress);
@@ -690,7 +692,7 @@ namespace Marius.Mister
             return true;
         }
 
-        private bool PerformAction(ref MisterWorkItem workItem, long sequence)
+        private bool PerformAction(ClientSession<TKeyAtom, TValueAtom, byte[], TValue, object, TFunctions> session, ref MisterWorkItem workItem, long sequence)
         {
             try
             {
@@ -711,59 +713,58 @@ namespace Marius.Mister
 
         private void WorkerLoop(object state)
         {
-            var hasSessionStarted = false;
             try
             {
                 var workerRefreshIntervalMilliseconds = _settings.WorkerRefreshIntervalMilliseconds;
                 var sequence = 0L;
-                var session = _faster.StartSession();
-                var hasPending = false;
-
-                hasSessionStarted = true;
-                Interlocked.Increment(ref _sessionsStarted);
-
-                while (!_cancellationTokenSource.IsCancellationRequested)
+                using (var session = _faster.NewSession(threadAffinitized: true))
                 {
-                    var needRefresh = false;
-                    if (_workQueue.IsEmpty)
+                    var hasPending = false;
+                    Interlocked.Increment(ref _sessionsStarted);
+
+                    while (!_cancellationTokenSource.IsCancellationRequested)
                     {
-                        lock (_workQueue)
+                        var needRefresh = false;
+                        if (_workQueue.IsEmpty)
                         {
-                            if (_workQueue.IsEmpty && !_cancellationTokenSource.IsCancellationRequested)
-                                needRefresh = !Monitor.Wait(_workQueue, workerRefreshIntervalMilliseconds);
-                        }
-                    }
-
-                    while (_workQueue.TryDequeue(out var item))
-                    {
-                        needRefresh = false;
-
-                        if (!item.Action(ref item, sequence))
-                            hasPending = true;
-
-                        sequence++;
-                        if ((sequence & 0x7F) == 0)
-                        {
-                            if (hasPending)
+                            lock (_workQueue)
                             {
-                                _faster.CompletePending(true);
-                                hasPending = false;
+                                if (_workQueue.IsEmpty && !_cancellationTokenSource.IsCancellationRequested)
+                                    needRefresh = !Monitor.Wait(_workQueue, workerRefreshIntervalMilliseconds);
                             }
-
-                            _faster.Refresh();
                         }
-                    }
 
-                    if (hasPending)
-                    {
-                        _faster.CompletePending(true);
-                        hasPending = false;
-                    }
+                        while (_workQueue.TryDequeue(out var item))
+                        {
+                            needRefresh = false;
 
-                    if (needRefresh)
-                    {
-                        _faster.CompletePending(false);
-                        _faster.Refresh();
+                            if (!item.Action(session, ref item, sequence))
+                                hasPending = true;
+
+                            sequence++;
+                            if ((sequence & 0x7F) == 0)
+                            {
+                                if (hasPending)
+                                {
+                                    session.CompletePending(true);
+                                    hasPending = false;
+                                }
+
+                                session.Refresh();
+                            }
+                        }
+
+                        if (hasPending)
+                        {
+                            session.CompletePending(true);
+                            hasPending = false;
+                        }
+
+                        if (needRefresh)
+                        {
+                            session.CompletePending(false);
+                            session.Refresh();
+                        }
                     }
                 }
             }
@@ -771,34 +772,6 @@ namespace Marius.Mister
             {
                 Log.Error(ex);
                 Trace.Write(ex);
-            }
-
-            if (!hasSessionStarted)
-                return;
-
-            try
-            {
-                while (_maintenanceService.IsRunning)
-                {
-                    _faster.Refresh();
-                    _faster.CompletePending(true);
-                    Thread.Sleep(10);
-                }
-
-                while (!_faster.CompletePending(true))
-                    _faster.Refresh();
-            }
-            finally
-            {
-                try
-                {
-                    _faster.StopSession();
-                }
-                catch (Exception ex)
-                {
-                    Log.Error(ex);
-                    Trace.Write(ex);
-                }
             }
         }
     }

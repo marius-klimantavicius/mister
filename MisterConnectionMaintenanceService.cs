@@ -9,10 +9,11 @@ using log4net;
 
 namespace Marius.Mister
 {
-    public class MisterConnectionMaintenanceService<TValue, TKeyAtom, TValueAtom, TFaster>
+    public class MisterConnectionMaintenanceService<TValue, TKeyAtom, TValueAtom, TFunctions, TFaster>
         where TKeyAtom : new()
         where TValueAtom : new()
-        where TFaster : IFasterKV<TKeyAtom, TValueAtom, byte[], TValue, object>
+        where TFunctions : IFunctions<TKeyAtom, TValueAtom, byte[], TValue, object>
+        where TFaster : IFasterKV<TKeyAtom, TValueAtom, byte[], TValue, object, TFunctions>
     {
         private struct MisterMaintenanceItem
         {
@@ -152,10 +153,12 @@ namespace Marius.Mister
             {
                 _currentCheckpointVersion = newCheckpoint;
 
-                _faster.StartSession();
-                _faster.TakeFullCheckpoint(out var token);
-                _faster.CompleteCheckpoint(true);
-                _faster.StopSession();
+                var token = default(Guid);
+                using (var session = _faster.NewSession(threadAffinitized: true))
+                {
+                    _faster.TakeFullCheckpoint(out token);
+                    session.CompletePending(true, true);
+                }
 
                 _takenCheckpoints[_takenCount++] = token;
                 if (_takenCount >= _takenCheckpoints.Length)
@@ -221,16 +224,11 @@ namespace Marius.Mister
         {
             try
             {
-                _faster.StartSession();
                 _faster.Log.Compact(_faster.Log.SafeReadOnlyAddress);
                 IncrementVersion();
             }
             catch
             {
-            }
-            finally
-            {
-                _faster.StopSession();
             }
         }
 

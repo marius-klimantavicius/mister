@@ -97,42 +97,44 @@ namespace FASTER.core
         /// <summary>
         /// Async enumerable for iterator
         /// </summary>
-        /// <returns>Entry and entry length</returns>
-        public async IAsyncEnumerable<(byte[], int)> GetAsyncEnumerable([EnumeratorCancellation] CancellationToken token = default)
+        /// <returns>Entry, entry length, entry address</returns>
+        public async IAsyncEnumerable<(byte[], int, long)> GetAsyncEnumerable([EnumeratorCancellation] CancellationToken token = default)
         {
             while (!disposed)
             {
                 byte[] result;
                 int length;
-                while (!GetNext(out result, out length, out long currentAddress))
+                long currentAddress;
+                while (!GetNext(out result, out length, out currentAddress))
                 {
                     if (currentAddress >= endAddress)
                         yield break;
                     if (!await WaitAsync(token))
                         yield break;
                 }
-                yield return (result, length);
+                yield return (result, length, currentAddress);
             }
         }
 
         /// <summary>
         /// Async enumerable for iterator (memory pool based version)
         /// </summary>
-        /// <returns>Entry and entry length</returns>
-        public async IAsyncEnumerable<(IMemoryOwner<byte>, int)> GetAsyncEnumerable(MemoryPool<byte> pool, [EnumeratorCancellation] CancellationToken token = default)
+        /// <returns>Entry, entry length, entry address</returns>
+        public async IAsyncEnumerable<(IMemoryOwner<byte>, int, long)> GetAsyncEnumerable(MemoryPool<byte> pool, [EnumeratorCancellation] CancellationToken token = default)
         {
             while (!disposed)
             {
                 IMemoryOwner<byte> result;
                 int length;
-                while (!GetNext(pool, out result, out length, out long currentAddress))
+                long currentAddress;
+                while (!GetNext(pool, out result, out length, out currentAddress))
                 {
                     if (currentAddress >= endAddress)
                         yield break;
                     if (!await WaitAsync(token))
                         yield break;
                 }
-                yield return (result, length);
+                yield return (result, length, currentAddress);
             }
         }
 #endif
@@ -191,7 +193,7 @@ namespace FASTER.core
                     // Use user delegate to allocate memory
                     entry = getMemory(entryLength);
                     if (entry.Length < entryLength)
-                        throw new Exception("Byte array provided has invalid length");
+                        throw new FasterException("Byte array provided has invalid length");
                 }
                 else
                 {
@@ -291,7 +293,7 @@ namespace FASTER.core
 
         private unsafe bool BufferAndLoad(long currentAddress, long currentPage, long currentFrame, long headAddress)
         {
-            for (int i=0; i<frameSize; i++)
+            for (int i = 0; i < frameSize; i++)
             {
                 var nextPage = currentPage + i;
 
@@ -334,7 +336,7 @@ namespace FASTER.core
                 loadedPage[currentFrame] = -1;
                 loadedCancel[currentFrame] = new CancellationTokenSource();
                 Utility.MonotonicUpdate(ref NextAddress, (1 + (currentAddress >> allocator.LogPageSizeBits)) << allocator.LogPageSizeBits, out _);
-                throw new Exception("Page read from storage failed, skipping page. Inner exception: " + e.ToString());
+                throw new FasterException("Page read from storage failed, skipping page. Inner exception: " + e.ToString());
             }
             epoch.Resume();
             return true;
@@ -438,7 +440,7 @@ namespace FASTER.core
                     {
                         epoch.Suspend();
                         var curPage = currentAddress >> allocator.LogPageSizeBits;
-                        throw new Exception("Invalid checksum found during scan, skipping page " + curPage);
+                        throw new FasterException("Invalid checksum found during scan, skipping page " + curPage);
                     }
                     else
                         continue;
@@ -451,7 +453,7 @@ namespace FASTER.core
                     if (Utility.MonotonicUpdate(ref NextAddress, currentAddress, out _))
                     {
                         epoch.Suspend();
-                        throw new Exception("Invalid length of record found: " + entryLength + " at address " + currentAddress + ", skipping page");
+                        throw new FasterException("Invalid length of record found: " + entryLength + " at address " + currentAddress + ", skipping page");
                     }
                     else
                         continue;
@@ -467,14 +469,14 @@ namespace FASTER.core
                         if (Utility.MonotonicUpdate(ref NextAddress, currentAddress, out _))
                         {
                             epoch.Suspend();
-                            throw new Exception("Invalid checksum found during scan, skipping page " + curPage);
+                            throw new FasterException("Invalid checksum found during scan, skipping page " + curPage);
                         }
                         else
                             continue;
                     }
                 }
 
-                
+
                 if ((currentAddress & allocator.PageSizeMask) + recordSize == allocator.PageSize)
                     currentAddress = (1 + (currentAddress >> allocator.LogPageSizeBits)) << allocator.LogPageSizeBits;
                 else

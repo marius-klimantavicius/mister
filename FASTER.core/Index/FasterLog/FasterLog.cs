@@ -276,7 +276,7 @@ namespace FASTER.core
 
             return SlowEnqueueAsync(this, entry, token);
         }
-        
+
         private static async ValueTask<long> SlowEnqueueAsync(FasterLog @this, ReadOnlyMemory<byte> entry, CancellationToken token)
         {
             long logicalAddress;
@@ -697,14 +697,14 @@ namespace FASTER.core
             if (name != null)
             {
                 if (name.Length > 20)
-                    throw new Exception("Max length of iterator name is 20 characters");
+                    throw new FasterException("Max length of iterator name is 20 characters");
                 if (PersistedIterators.ContainsKey(name))
                     Debug.WriteLine("Iterator name exists, overwriting");
                 PersistedIterators[name] = iter;
             }
 
             if (Interlocked.Increment(ref logRefCount) == 1)
-                throw new Exception("Cannot scan disposed log instance");
+                throw new FasterException("Cannot scan disposed log instance");
             return iter;
         }
 
@@ -922,7 +922,7 @@ namespace FASTER.core
                 length = GetLength(ptr);
                 if (!VerifyChecksum(ptr, length))
                 {
-                    throw new Exception("Checksum failed for read");
+                    throw new FasterException("Checksum failed for read");
                 }
                 result = getMemory != null ? getMemory(length) : new byte[length];
                 fixed (byte* bp = result)
@@ -937,7 +937,7 @@ namespace FASTER.core
         private long CommitInternal(bool spinWait = false)
         {
             epoch.Resume();
-            if (allocator.ShiftReadOnlyToTail(out long tailAddress))
+            if (allocator.ShiftReadOnlyToTail(out long tailAddress, out _))
             {
                 if (spinWait)
                 {

@@ -38,6 +38,7 @@
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
     <PlatformTarget>AnyCPU</PlatformTarget>
@@ -48,6 +49,7 @@
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="log4net, Version=2.0.8.0, Culture=neutral, PublicKeyToken=669e0ddf0bb1aa2a, processorArchitecture=MSIL">
@@ -94,6 +96,9 @@
     <Compile Include="FASTER.core\Allocator\PendingFlushList.cs" />
     <Compile Include="FASTER.core\Allocator\VarLenBlittableAllocator.cs" />
     <Compile Include="FASTER.core\Allocator\VarLenBlittableScanIterator.cs" />
+    <Compile Include="FASTER.core\ClientSession\ClientSession.cs" />
+    <Compile Include="FASTER.core\ClientSession\FASTERAsync.cs" />
+    <Compile Include="FASTER.core\ClientSession\FASTERClientSession.cs" />
     <Compile Include="FASTER.core\Device\Devices.cs" />
     <Compile Include="FASTER.core\Device\FixedPool.cs" />
     <Compile Include="FASTER.core\Device\IDevice.cs" />
@@ -124,6 +129,7 @@
     <Compile Include="FASTER.core\Index\FASTER\FASTER.cs" />
     <Compile Include="FASTER.core\Index\FASTER\FASTERBase.cs" />
     <Compile Include="FASTER.core\Index\FASTER\FASTERImpl.cs" />
+    <Compile Include="FASTER.core\Index\FASTER\FASTERLegacy.cs" />
     <Compile Include="FASTER.core\Index\FASTER\FASTERThread.cs" />
     <Compile Include="FASTER.core\Index\FASTER\LogAccessor.cs" />
     <Compile Include="FASTER.core\Index\Interfaces\FunctionsBase.cs" />
@@ -138,9 +144,11 @@
     <Compile Include="FASTER.core\Index\Recovery\IndexRecovery.cs" />
     <Compile Include="FASTER.core\Index\Recovery\LocalCheckpointManager.cs" />
     <Compile Include="FASTER.core\Index\Recovery\Recovery.cs" />
+    <Compile Include="FASTER.core\Utilities\AsyncQueue.cs" />
     <Compile Include="FASTER.core\Utilities\AsyncResultTypes.cs" />
     <Compile Include="FASTER.core\Utilities\BufferPool.cs" />
     <Compile Include="FASTER.core\Utilities\FasterEqualityComparer.cs" />
+    <Compile Include="FASTER.core\Utilities\FasterException.cs" />
     <Compile Include="FASTER.core\Utilities\Native32.cs" />
     <Compile Include="FASTER.core\Utilities\PageAsyncResultTypes.cs" />
     <Compile Include="FASTER.core\Utilities\SafeConcurrentDictionary.cs" />
