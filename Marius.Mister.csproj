@@ -170,6 +170,7 @@
     <Compile Include="MisterConnectionMaintenanceService.cs" />
     <Compile Include="MisterConnectionSettings.cs" />
     <Compile Include="MisterObjectLongSerializer.cs" />
+    <Compile Include="MisterObjectStringUtf8Serializer.cs" />
     <Compile Include="MisterStreamLongSerializer.cs" />
     <Compile Include="MisterObject.cs" />
     <Compile Include="MisterObjectEnvironment.cs" />
