@@ -107,7 +107,7 @@ namespace FASTER.core
         }
     }
 
-
+ 
     /// <summary>
     /// Descriptor for a CPR commit point
     /// </summary>
@@ -245,10 +245,10 @@ namespace FASTER.core
                     exclusions.Add(long.Parse(reader.ReadLine()));
 
                 continueTokens.TryAdd(guid, new CommitPoint
-                {
-                    UntilSerialNo = serialno,
-                    ExcludedSerialNos = exclusions
-                });
+                    {
+                        UntilSerialNo = serialno,
+                        ExcludedSerialNos = exclusions
+                    });
             }
 
             // Read object log segment offsets
@@ -278,7 +278,9 @@ namespace FASTER.core
                 throw new FasterException("Invalid log commit metadata for ID " + token.ToString());
 
             using (StreamReader s = new StreamReader(new MemoryStream(metadata)))
+            {
                 Initialize(s);
+            }
         }
 
         /// <summary>
