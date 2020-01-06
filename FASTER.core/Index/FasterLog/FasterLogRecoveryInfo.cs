@@ -147,7 +147,7 @@ namespace FASTER.core
 
                 foreach (var kvp in persistedIterators)
                 {
-                    Iterators.Add(kvp.Key, kvp.Value.requestedCompletedUntilAddress);
+                    Iterators.Add(kvp.Key, kvp.Value.CompletedUntilAddress);
                 }
             }
         }
@@ -162,7 +162,7 @@ namespace FASTER.core
             {
                 foreach (var kvp in Iterators)
                 {
-                    persistedIterators[kvp.Key].UpdateCompletedUntilAddress(kvp.Value);
+                    persistedIterators[kvp.Key].CompletedUntilAddress = kvp.Value;
                 }
             }
         }

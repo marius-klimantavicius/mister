@@ -31,7 +31,7 @@ namespace FASTER.core
         private readonly GetMemory getMemory;
         private readonly int headerSize;
         private bool disposed = false;
-        internal long requestedCompletedUntilAddress;
+        private long requestedCompletedUntilAddress;
 
         /// <summary>
         /// Next address
@@ -154,7 +154,6 @@ namespace FASTER.core
                 return new ValueTask<bool>(true);
 
             return SlowWaitAsync(this, token);
-
         }
 
         // use static local function to guarantee there's no accidental closure getting allocated here
@@ -294,7 +293,7 @@ namespace FASTER.core
 
         private unsafe bool BufferAndLoad(long currentAddress, long currentPage, long currentFrame, long headAddress)
         {
-            for (int i=0; i<frameSize; i++)
+            for (int i = 0; i < frameSize; i++)
             {
                 var nextPage = currentPage + i;
 
@@ -477,7 +476,7 @@ namespace FASTER.core
                     }
                 }
 
-                
+
                 if ((currentAddress & allocator.PageSizeMask) + recordSize == allocator.PageSize)
                     currentAddress = (1 + (currentAddress >> allocator.LogPageSizeBits)) << allocator.LogPageSizeBits;
                 else

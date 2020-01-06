@@ -1395,7 +1395,8 @@ namespace FASTER.core
                 completedSemaphore = completedSemaphore,
                 count = totalNumPages
             };
-            var localSegmentOffsets = new long[SegmentBufferSize];
+
+            var localSegmentOffsets =  new long[SegmentBufferSize];
 
             for (long flushPage = startPage; flushPage < endPage; flushPage++)
             {
