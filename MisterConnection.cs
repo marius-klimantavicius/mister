@@ -260,7 +260,8 @@ namespace Marius.Mister
         private readonly CancellationTokenSource _cancellationTokenSource;
         private bool _isClosed;
 
-        private object _lock = new object();
+        private readonly object _lock = new object();
+
         private ConcurrentQueue<MisterWorkItem> _workQueue;
         private Thread[] _workerThreads;
         private int _sessionsStarted;
