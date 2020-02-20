@@ -1,11 +1,11 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using FASTER.core;
-using log4net;
 
 namespace Marius.Mister
 {
@@ -32,8 +32,6 @@ namespace Marius.Mister
                 ResetEvent = null;
             }
         }
-
-        private static readonly ILog Log = LogManager.GetLogger("MisterConnectionCheckpointService");
 
         private readonly DirectoryInfo _directory;
         private readonly FileInfo _checkpointTokenFile;
@@ -207,7 +205,7 @@ namespace Marius.Mister
                 }
                 catch (Exception ex)
                 {
-                    Log.Error(ex);
+                    Trace.TraceError(ex.ToString());
                 }
             }
         }
@@ -260,7 +258,7 @@ namespace Marius.Mister
                 }
                 catch (Exception ex)
                 {
-                    Log.Error(ex);
+                    Trace.TraceError(ex.ToString());
                 }
             }
 
@@ -358,7 +356,7 @@ namespace Marius.Mister
             }
             catch (Exception ex)
             {
-                Log.Error(ex);
+                Trace.TraceError(ex.ToString());
             }
             finally
             {

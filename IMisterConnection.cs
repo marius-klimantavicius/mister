@@ -5,21 +5,18 @@ namespace Marius.Mister
 {
     public interface IMisterConnection<TKey, TValue>
     {
+        IMisterSession<TKey, TValue> CreateSession(string sessionId = null);
+        
         void Close();
         void Checkpoint();
         Task CheckpointAsync();
-        Task FlushAsync(bool waitPending = false);
-        Task<TValue> GetAsync(TKey key, bool waitPending = false);
-        Task SetAsync(TKey key, TValue value, bool waitPending = false);
-        Task DeleteAsync(TKey key, bool waitPending = false);
-        T FlushAsync<T>(T notifyCompletion, bool waitPending = false)
-            where T : class, IMisterNotifyCompletion;
-        T GetAsync<T>(TKey key, T notifyCompletion, bool waitPending = false)
-            where T : class, IMisterNotifyCompletion<TValue>;
-        T SetAsync<T>(TKey key, TValue value, T notifyCompletion, bool waitPending = false)
-            where T : class, IMisterNotifyCompletion;
-        T DeleteAsync<T>(TKey key, T notifyCompletion, bool waitPending = false)
-                   where T : class, IMisterNotifyCompletion;
-        void ForEach(Action<TKey, TValue, bool, object> onRecord, Action<object> onCompleted = null, object state = default(object));
+
+        void Flush(bool waitPending = false);
+        
+        ValueTask<TValue> GetAsync(TKey key, bool waitPending = true);
+        ValueTask SetAsync(TKey key, TValue value, bool waitPending = true);
+        ValueTask DeleteAsync(TKey key, bool waitPending = true);
+        
+        void ForEach<TState>(Action<TKey, TValue, bool, TState> onRecord, Action<TState> onCompleted = null, TState state = default(TState));
     }
 }

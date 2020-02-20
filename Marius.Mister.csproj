@@ -52,9 +52,6 @@
     <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="log4net, Version=2.0.8.0, Culture=neutral, PublicKeyToken=669e0ddf0bb1aa2a, processorArchitecture=MSIL">
-      <HintPath>packages\log4net.2.0.8\lib\net45-full\log4net.dll</HintPath>
-    </Reference>
     <Reference Include="System" />
     <Reference Include="System.Buffers, Version=4.0.3.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
       <HintPath>packages\System.Buffers.4.5.0\lib\netstandard2.0\System.Buffers.dll</HintPath>
@@ -160,9 +157,11 @@
     <Compile Include="IMisterNotifyCompletion1.cs" />
     <Compile Include="IMisterObjectSerializer.cs" />
     <Compile Include="IMisterAtomSource.cs" />
+    <Compile Include="IMisterSession.cs" />
     <Compile Include="IMisterStreamManager.cs" />
     <Compile Include="IMisterStreamSerializer.cs" />
     <Compile Include="IMisterSerializer.cs" />
+    <Compile Include="IMisterThreadConnection.cs" />
     <Compile Include="MisterArrayPoolStream.cs" />
     <Compile Include="MisterArrayPoolObjectSource.cs" />
     <Compile Include="MisterArrayPoolStreamManager.cs" />
@@ -180,6 +179,7 @@
     <Compile Include="MisterStreamSerializer.cs" />
     <Compile Include="MisterStreamStringSerializer.cs" />
     <Compile Include="MisterObjectStringSerializer.cs" />
+    <Compile Include="MisterThreadConnection.cs" />
     <Compile Include="MisterThreadPoolAwaiter.cs" />
     <Compile Include="MisterVoid.cs" />
     <Compile Include="Program.cs" />

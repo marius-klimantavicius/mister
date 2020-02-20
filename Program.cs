@@ -33,7 +33,7 @@ namespace Marius.Mister
 
         public static async Task Main(string[] args)
         {
-            var serializer = new MisterObjectStringSerializer();
+            var serializer = new MisterObjectStringUtf8Serializer();
             var settings = new MisterConnectionSettings()
             {
                 PageSizeBits = 20,
@@ -41,7 +41,6 @@ namespace Marius.Mister
             };
 
             var connection = MisterConnection.Create(new DirectoryInfo(@"C:\Mister"), serializer, serializer, settings: settings);
-
             var sw = Stopwatch.StartNew();
             while (true)
             {
@@ -76,7 +75,7 @@ namespace Marius.Mister
                 {
                     using (new DurationLogger(sw))
                     {
-                        await connection.FlushAsync(true);
+                        connection.Flush(true);
                     }
                 }
                 else if (parts[0] == "del" && parts.Length > 1)
@@ -115,20 +114,18 @@ namespace Marius.Mister
                     if (parts.Length > 2)
                         prefix = parts[2];
 
-                    using (new DurationLogger())
+                    using (new DurationLogger(sw))
                     {
                         var tasks = new Task[count];
                         for (var i = 0; i < tasks.Length; i++)
                         {
-                            tasks[i] = connection.SetAsync($"{prefix}{i}", $"{prefix}{i}");
+                            tasks[i] = connection.SetAsync($"{prefix}{i}", $"{prefix}{i}").AsTask();
                         }
 
                         await Task.WhenAll(tasks);
-                        Console.WriteLine(sw.Elapsed);
                     }
                 }
             }
-
             connection.Close();
 
             Console.WriteLine("Done.");
