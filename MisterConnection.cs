@@ -472,7 +472,7 @@ namespace Marius.Mister
             CheckDisposed();
 
             var existing = default(MisterSession);
-            if (!string.IsNullOrEmpty(sessionId))
+            if (string.IsNullOrEmpty(sessionId))
                 existing = Interlocked.Exchange(ref _sessionCache, null);
 
             if (existing != null)
