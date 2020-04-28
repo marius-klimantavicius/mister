@@ -240,10 +240,10 @@ namespace FASTER.core
             if (TryEnqueue(entry, out long logicalAddress))
                 return new ValueTask<long>(logicalAddress);
 
-            return SlowEnqueueAsync(this, entry, token);
+            return SlowEnqueueAsync1(this, entry, token);
         }
 
-        private static async ValueTask<long> SlowEnqueueAsync(FasterLog @this, byte[] entry, CancellationToken token)
+        private static async ValueTask<long> SlowEnqueueAsync1(FasterLog @this, byte[] entry, CancellationToken token)
         {
             long logicalAddress;
             while (true)

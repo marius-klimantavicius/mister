@@ -53,23 +53,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="System" />
-    <Reference Include="System.Buffers, Version=4.0.3.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
-      <HintPath>packages\System.Buffers.4.5.0\lib\netstandard2.0\System.Buffers.dll</HintPath>
-    </Reference>
     <Reference Include="System.Core" />
-    <Reference Include="System.Memory, Version=4.0.1.1, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
-      <HintPath>packages\System.Memory.4.5.3\lib\netstandard2.0\System.Memory.dll</HintPath>
-    </Reference>
     <Reference Include="System.Numerics" />
-    <Reference Include="System.Numerics.Vectors, Version=4.1.4.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
-      <HintPath>packages\System.Numerics.Vectors.4.5.0\lib\net46\System.Numerics.Vectors.dll</HintPath>
-    </Reference>
-    <Reference Include="System.Runtime.CompilerServices.Unsafe, Version=4.0.5.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
-      <HintPath>packages\System.Runtime.CompilerServices.Unsafe.4.6.0\lib\netstandard2.0\System.Runtime.CompilerServices.Unsafe.dll</HintPath>
-    </Reference>
-    <Reference Include="System.Threading.Tasks.Extensions, Version=4.2.0.1, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
-      <HintPath>packages\System.Threading.Tasks.Extensions.4.5.3\lib\netstandard2.0\System.Threading.Tasks.Extensions.dll</HintPath>
-    </Reference>
     <Reference Include="System.Xml.Linq" />
     <Reference Include="System.Data.DataSetExtensions" />
     <Reference Include="Microsoft.CSharp" />
@@ -141,15 +126,24 @@
     <Compile Include="FASTER.core\Index\Recovery\IndexRecovery.cs" />
     <Compile Include="FASTER.core\Index\Recovery\LocalCheckpointManager.cs" />
     <Compile Include="FASTER.core\Index\Recovery\Recovery.cs" />
+    <Compile Include="FASTER.core\Index\Synchronization\FasterStateMachine.cs" />
+    <Compile Include="FASTER.core\Index\Synchronization\FullCheckpointStateMachine.cs" />
+    <Compile Include="FASTER.core\Index\Synchronization\HybridLogCheckpointTask.cs" />
+    <Compile Include="FASTER.core\Index\Synchronization\IndexResizeStateMachine.cs" />
+    <Compile Include="FASTER.core\Index\Synchronization\IndexSnapshotStateMachine.cs" />
+    <Compile Include="FASTER.core\Index\Synchronization\ISynchronizationStateMachine.cs" />
+    <Compile Include="FASTER.core\Index\Synchronization\StateTransitions.cs" />
+    <Compile Include="FASTER.core\Index\Synchronization\VersionChangeStateMachine.cs" />
+    <Compile Include="FASTER.core\Utilities\AsyncCountDown.cs" />
     <Compile Include="FASTER.core\Utilities\AsyncQueue.cs" />
     <Compile Include="FASTER.core\Utilities\AsyncResultTypes.cs" />
     <Compile Include="FASTER.core\Utilities\BufferPool.cs" />
+    <Compile Include="FASTER.core\Utilities\FasterAsyncOperation.cs" />
     <Compile Include="FASTER.core\Utilities\FasterEqualityComparer.cs" />
     <Compile Include="FASTER.core\Utilities\FasterException.cs" />
     <Compile Include="FASTER.core\Utilities\Native32.cs" />
     <Compile Include="FASTER.core\Utilities\PageAsyncResultTypes.cs" />
     <Compile Include="FASTER.core\Utilities\SafeConcurrentDictionary.cs" />
-    <Compile Include="FASTER.core\Utilities\StateTransitions.cs" />
     <Compile Include="FASTER.core\Utilities\Status.cs" />
     <Compile Include="FASTER.core\Utilities\Utility.cs" />
     <Compile Include="IMisterConnection.cs" />
@@ -189,7 +183,6 @@
     <None Include="App.config" />
     <None Include="FASTER.core\LICENSE" />
     <None Include="LICENSE" />
-    <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
     <BootstrapperPackage Include=".NETFramework,Version=v4.7.2">
@@ -202,6 +195,23 @@
       <ProductName>.NET Framework 3.5 SP1</ProductName>
       <Install>false</Install>
     </BootstrapperPackage>
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Buffers">
+      <Version>4.5.0</Version>
+    </PackageReference>
+    <PackageReference Include="System.Memory">
+      <Version>4.5.3</Version>
+    </PackageReference>
+    <PackageReference Include="System.Numerics.Vectors">
+      <Version>4.5.0</Version>
+    </PackageReference>
+    <PackageReference Include="System.Runtime.CompilerServices.Unsafe">
+      <Version>4.6.0</Version>
+    </PackageReference>
+    <PackageReference Include="System.Threading.Tasks.Extensions">
+      <Version>4.5.3</Version>
+    </PackageReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

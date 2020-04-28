@@ -108,9 +108,9 @@ namespace Marius.Mister
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public ValueTask<TValue> GetAsync(TKey key, bool waitPending)
+        public ValueTask<TValue> GetAsync(TKey key, bool waitCommit)
         {
-            return _underlyingConnection.GetAsync(key, waitPending);
+            return _underlyingConnection.GetAsync(key, waitCommit);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -120,9 +120,9 @@ namespace Marius.Mister
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public ValueTask SetAsync(TKey key, TValue value, bool waitPending)
+        public ValueTask SetAsync(TKey key, TValue value, bool waitCommit)
         {
-            return _underlyingConnection.SetAsync(key, value, waitPending);
+            return _underlyingConnection.SetAsync(key, value, waitCommit);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -132,9 +132,9 @@ namespace Marius.Mister
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public ValueTask DeleteAsync(TKey key, bool waitPending)
+        public ValueTask DeleteAsync(TKey key, bool waitCommit)
         {
-            return _underlyingConnection.DeleteAsync(key, waitPending);
+            return _underlyingConnection.DeleteAsync(key, waitCommit);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -239,7 +239,7 @@ namespace Marius.Mister
                 }
             }
 
-            public async ValueTask<TValue> GetAsync(TKey key, bool waitPending = false)
+            public async ValueTask<TValue> GetAsync(TKey key, bool waitCommit = false)
             {
                 if (_isDisposed || _cancellationToken.IsCancellationRequested)
                     throw new ObjectDisposedException("Session");
@@ -247,12 +247,16 @@ namespace Marius.Mister
                 using (var source = _connection._keySerializer.Serialize(key))
                 {
                     var input = default(byte[]);
-                    var result = await _session.ReadAsync(ref source.GetAtom(), ref input, waitForCommit: waitPending, token: _cancellationToken);
+                    var readResult = await _session.ReadAsync(ref source.GetAtom(), ref input, token: _cancellationToken);
+                    if (waitCommit)
+                        await _session.WaitForCommitAsync();
+
+                    var result = readResult.CompleteRead();
                     return result.Item2;
                 }
             }
 
-            public async ValueTask SetAsync(TKey key, TValue value, bool waitPending = false)
+            public async ValueTask SetAsync(TKey key, TValue value, bool waitCommit = false)
             {
                 if (_isDisposed || _cancellationToken.IsCancellationRequested)
                     throw new ObjectDisposedException("MisterSession");
@@ -260,19 +264,19 @@ namespace Marius.Mister
                 using (var keySource = _connection._keySerializer.Serialize(key))
                 using (var valueSource = _connection._valueSerializer.Serialize(value))
                 {
-                    await _session.UpsertAsync(ref keySource.GetAtom(), ref valueSource.GetAtom(), waitForCommit: waitPending, token: _cancellationToken);
+                    await _session.UpsertAsync(ref keySource.GetAtom(), ref valueSource.GetAtom(), waitForCommit: waitCommit, token: _cancellationToken);
                     _connection._maintenanceService.IncrementVersion();
                 }
             }
 
-            public async ValueTask DeleteAsync(TKey key, bool waitPending = false)
+            public async ValueTask DeleteAsync(TKey key, bool waitCommit = false)
             {
                 if (_isDisposed || _cancellationToken.IsCancellationRequested)
                     throw new ObjectDisposedException("Session");
 
                 using (var keySource = _connection._keySerializer.Serialize(key))
                 {
-                    await _session.DeleteAsync(ref keySource.GetAtom(), waitForCommit: waitPending, token: _cancellationToken);
+                    await _session.DeleteAsync(ref keySource.GetAtom(), waitForCommit: waitCommit, token: _cancellationToken);
                     _connection._maintenanceService.IncrementVersion();
                 }
             }
@@ -370,12 +374,12 @@ namespace Marius.Mister
             _maintenanceService.IncrementVersion();
         }
 
-        public async ValueTask<TValue> GetAsync(TKey key, bool waitPending = false)
+        public async ValueTask<TValue> GetAsync(TKey key, bool waitCommit = false)
         {
             var session = GetOrCreateSession();
             try
             {
-                return await session.GetAsync(key, waitPending);
+                return await session.GetAsync(key, waitCommit);
             }
             finally
             {
@@ -385,12 +389,12 @@ namespace Marius.Mister
             }
         }
 
-        public async ValueTask SetAsync(TKey key, TValue value, bool waitPending = false)
+        public async ValueTask SetAsync(TKey key, TValue value, bool waitCommit = false)
         {
             var session = GetOrCreateSession();
             try
             {
-                await session.SetAsync(key, value, waitPending);
+                await session.SetAsync(key, value, waitCommit);
             }
             finally
             {
@@ -400,12 +404,12 @@ namespace Marius.Mister
             }
         }
 
-        public async ValueTask DeleteAsync(TKey key, bool waitPending = false)
+        public async ValueTask DeleteAsync(TKey key, bool waitCommit = false)
         {
             var session = GetOrCreateSession();
             try
             {
-                await session.GetAsync(key, waitPending);
+                await session.GetAsync(key, waitCommit);
             }
             finally
             {
