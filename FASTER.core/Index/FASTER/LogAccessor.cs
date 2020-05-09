@@ -15,13 +15,11 @@ namespace FASTER.core
     /// <typeparam name="Input"></typeparam>
     /// <typeparam name="Output"></typeparam>
     /// <typeparam name="Context"></typeparam>
-    /// <typeparam name="Functions"></typeparam>
-    public sealed class LogAccessor<Key, Value, Input, Output, Context, Functions> : IObservable<IFasterScanIterator<Key, Value>>
+    public sealed class LogAccessor<Key, Value, Input, Output, Context> : IObservable<IFasterScanIterator<Key, Value>>
         where Key : new()
         where Value : new()
-        where Functions : IFunctions<Key, Value, Input, Output, Context>
     {
-        private readonly FasterKV<Key, Value, Input, Output, Context, Functions> fht;
+        private readonly FasterKV<Key, Value, Input, Output, Context> fht;
         private readonly AllocatorBase<Key, Value> allocator;
 
         /// <summary>
@@ -29,7 +27,7 @@ namespace FASTER.core
         /// </summary>
         /// <param name="fht"></param>
         /// <param name="allocator"></param>
-        public LogAccessor(FasterKV<Key, Value, Input, Output, Context, Functions> fht, AllocatorBase<Key, Value> allocator)
+        public LogAccessor(FasterKV<Key, Value, Input, Output, Context> fht, AllocatorBase<Key, Value> allocator)
         {
             this.fht = fht;
             this.allocator = allocator;
@@ -204,13 +202,13 @@ namespace FASTER.core
         private void Compact<T>(T functions, long untilAddress, VariableLengthStructSettings<Key, Value> variableLengthStructSettings)
             where T : IFunctions<Key, Value, Input, Output, Context>
         {
-            var fhtSession = fht.NewSession();
+            var fhtSession = fht.NewSession<T>(functions);
 
             var originalUntilAddress = untilAddress;
 
-            var tempKv = new FasterKV<Key, Value, Input, Output, Context, T>
-                (fht.IndexSize, functions, new LogSettings(), comparer: fht.Comparer, variableLengthStructSettings: variableLengthStructSettings);
-            var tempKvSession = tempKv.NewSession();
+            var tempKv = new FasterKV<Key, Value, Input, Output, Context>
+                (fht.IndexSize, new LogSettings(), comparer: fht.Comparer, variableLengthStructSettings: variableLengthStructSettings);
+            var tempKvSession = tempKv.NewSession<T>(functions);
 
             using (var iter1 = fht.Log.Scan(fht.Log.BeginAddress, untilAddress))
             {

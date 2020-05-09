@@ -11,6 +11,11 @@ using System.Threading.Tasks;
 
 namespace FASTER.core
 {
+    internal interface IClientSession
+    {
+        void AtomicSwitch(int version);
+    }
+
     /// <summary>
     /// Thread-independent session interface to FASTER
     /// </summary>
@@ -20,19 +25,19 @@ namespace FASTER.core
     /// <typeparam name="Output"></typeparam>
     /// <typeparam name="Context"></typeparam>
     /// <typeparam name="Functions"></typeparam>
-    public sealed class ClientSession<Key, Value, Input, Output, Context, Functions> : IDisposable
+    public sealed class ClientSession<Key, Value, Input, Output, Context, Functions> : IClientSession, IDisposable
         where Key : new()
         where Value : new()
         where Functions : IFunctions<Key, Value, Input, Output, Context>
     {
         internal readonly bool SupportAsync = false;
-        private readonly FasterKV<Key, Value, Input, Output, Context, Functions> fht;
-        internal readonly FasterKV<Key, Value, Input, Output, Context, Functions>.FasterExecutionContext ctx;
+        private readonly FasterKV<Key, Value, Input, Output, Context> fht;
+        internal readonly FasterKV<Key, Value, Input, Output, Context>.FasterExecutionContext<Functions> ctx;
         internal CommitPoint LatestCommitPoint;
 
         internal ClientSession(
-            FasterKV<Key, Value, Input, Output, Context, Functions> fht,
-            FasterKV<Key, Value, Input, Output, Context, Functions>.FasterExecutionContext ctx,
+            FasterKV<Key, Value, Input, Output, Context> fht,
+            FasterKV<Key, Value, Input, Output, Context>.FasterExecutionContext<Functions> ctx,
             bool supportAsync)
         {
             this.fht = fht;
@@ -94,7 +99,7 @@ namespace FASTER.core
         /// <param name="token"></param>
         /// <returns>ReadAsyncResult - call CompleteRead on the return value to complete the read operation</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public ValueTask<FasterKV<Key, Value, Input, Output, Context, Functions>.ReadAsyncResult> ReadAsync(ref Key key, ref Input input, Context context = default, CancellationToken token = default)
+        public ValueTask<FasterKV<Key, Value, Input, Output, Context>.ReadAsyncResult<Functions>> ReadAsync(ref Key key, ref Input input, Context context = default, CancellationToken token = default)
         {
             return fht.ReadAsync(this, ref key, ref input, context, token);
         }        
@@ -399,5 +404,9 @@ namespace FASTER.core
             fht.epoch.Suspend();
         }
 
+        void IClientSession.AtomicSwitch(int version)
+        {
+            fht.AtomicSwitch(ctx, ctx.prevCtx, version);
+        }
     }
 }

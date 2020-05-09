@@ -6,15 +6,14 @@ using System.Threading.Tasks;
 
 namespace FASTER.core
 {
-    public partial class FasterKV<Key, Value, Input, Output, Context, Functions>
+    public partial class FasterKV<Key, Value, Input, Output, Context>
         where Key : new()
         where Value : new()
-        where Functions : IFunctions<Key, Value, Input, Output, Context>
     {
         // The current system state, defined as the combination of a phase and a version number. This value
         // is observed by all sessions and a state machine communicates its progress to sessions through
         // this value
-        private SystemState _systemState;
+        internal SystemState _systemState;
         // This flag ensures that only one state machine is active at a given time.
         private volatile int stateMachineActive = 0;
         // The current state machine in the system. The value could be stale and point to the previous state machine
@@ -125,10 +124,11 @@ namespace FASTER.core
         /// <param name="async"></param>
         /// <param name="token"></param>
         /// <returns></returns>
-        private async ValueTask ThreadStateMachineStep(FasterExecutionContext ctx,
+        private async ValueTask ThreadStateMachineStep<Functions>(FasterExecutionContext<Functions> ctx,
             ClientSession<Key, Value, Input, Output, Context, Functions> clientSession,
             bool async = true,
             CancellationToken token = default)
+            where Functions : IFunctions<Key, Value, Input, Output, Context>
         {
             if (async)
                 clientSession?.UnsafeResumeThread();
@@ -159,5 +159,38 @@ namespace FASTER.core
                 threadState = currentTask.NextState(threadState);
             } while (previousState.word != targetState.word);
         }
+
+        /// <summary>
+        /// Steps the thread's local state machine. Threads catch up to the current global state and performs
+        /// necessary actions associated with the state as defined by the current state machine
+        /// </summary>
+        /// <param name="ctx">null if calling without a context (e.g. waiting on a checkpoint)</param>
+        /// <param name="clientSession">null if calling without a session (e.g. waiting on a checkpoint)</param>
+        /// <param name="async"></param>
+        /// <param name="token"></param>
+        /// <returns></returns>
+        private async ValueTask ThreadStateMachineStep(CancellationToken token = default)
+        {
+            // Target state is the current (non-intermediate state) system state thread needs to catch up to
+            var (currentTask, targetState) = CaptureTaskAndTargetState();
+
+            // the current thread state is what the thread remembers, or simply what the current system
+            // is if we are calling from somewhere other than an execution thread (e.g. waiting on
+            // a checkpoint to complete on a client app thread)
+            var threadState = targetState;
+
+            // If the thread was in the middle of handling some older, unrelated task, fast-forward to the current task
+            // as the old one is no longer relevant
+            threadState = FastForwardToCurrentCycle(threadState, targetState);
+            var previousState = threadState;
+            do
+            {
+                await currentTask.OnThreadEnteringState(threadState, previousState, this, token);
+
+                previousState.word = threadState.word;
+                threadState = currentTask.NextState(threadState);
+            } while (previousState.word != targetState.word);
+        }
+
     }
 }

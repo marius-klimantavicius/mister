@@ -62,10 +62,9 @@ namespace FASTER.core
         }
     }
 
-    public partial class FasterKV<Key, Value, Input, Output, Context, Functions> : FasterBase, IFasterKV<Key, Value, Input, Output, Context, Functions>
+    public partial class FasterKV<Key, Value, Input, Output, Context> : FasterBase, IFasterKV<Key, Value, Input, Output, Context>
         where Key : new()
         where Value : new()
-        where Functions : IFunctions<Key, Value, Input, Output, Context>
     {
         internal struct PendingContext
         {
@@ -93,7 +92,8 @@ namespace FASTER.core
             }
         }
 
-        internal sealed class FasterExecutionContext : SerializedFasterExecutionContext
+        internal sealed class FasterExecutionContext<Functions> : SerializedFasterExecutionContext
+            where Functions : IFunctions<Key, Value, Input, Output, Context>
         {
             public Phase phase;
             public bool[] markers;
@@ -103,6 +103,8 @@ namespace FASTER.core
             public AsyncCountDown pendingReads;
             public AsyncQueue<AsyncIOContext<Key, Value>> readyResponses;
             public List<long> excludedSerialNos;
+
+            public Functions functions;
 
             public bool HasNoPendingRequests
             {
@@ -114,7 +116,12 @@ namespace FASTER.core
                 }
             }
 
-            public FasterExecutionContext prevCtx;
+            public FasterExecutionContext<Functions> prevCtx;
+
+            public FasterExecutionContext(Functions functions)
+            {
+                this.functions = functions;
+            }
         }
     }
 
