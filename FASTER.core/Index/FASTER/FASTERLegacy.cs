@@ -5,29 +5,52 @@
 
 using System;
 using System.Diagnostics;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace FASTER.core
 {
-    public partial class FasterKV<Key, Value, Input, Output, Context, Functions> : FasterBase, IFasterKV<Key, Value, Input, Output, Context, Functions>
+    public partial class FasterKV<Key, Value, Input, Output, Context, Functions> : IDisposable, IFasterKV<Key, Value, Input, Output, Context, Functions>
         where Key : new()
         where Value : new()
         where Functions : IFunctions<Key, Value, Input, Output, Context>
     {
-        private FastThreadLocal<FasterExecutionContext> threadCtx;
+        private FastThreadLocal<FasterKV<Key, Value, Input, Output, Context>.FasterExecutionContext> _threadCtx;
+
+        private readonly FasterKV<Key, Value, Input, Output, Context> _fasterKV;
+        private readonly Functions _functions;
+
+        public long EntryCount => _fasterKV.EntryCount;
+
+        public long IndexSize => _fasterKV.IndexSize;
+
+        public IFasterEqualityComparer<Key> Comparer => _fasterKV.Comparer;
+
+        public LogAccessor<Key, Value, Input, Output, Context> Log => _fasterKV.Log;
+
+        public LogAccessor<Key, Value, Input, Output, Context> ReadCache => _fasterKV.ReadCache;
+
+        public FasterKV(long size, Functions functions, LogSettings logSettings,
+            CheckpointSettings checkpointSettings = null, SerializerSettings<Key, Value> serializerSettings = null,
+            IFasterEqualityComparer<Key> comparer = null,
+            VariableLengthStructSettings<Key, Value> variableLengthStructSettings = null)
+        {
+            _functions = functions;
+            _fasterKV = new FasterKV<Key, Value, Input, Output, Context>(size, logSettings, checkpointSettings, serializerSettings, comparer, variableLengthStructSettings);
+        }
 
         /// <summary>
         /// Dispose FASTER instance - legacy items
         /// </summary>
         private void LegacyDispose()
         {
-            threadCtx?.Dispose();
+            _threadCtx?.Dispose();
         }
 
         private bool InLegacySession()
         {
-            return threadCtx != null;
+            return _threadCtx != null;
         }
-
 
         /// <summary>
         /// Legacy API: Start session with FASTER - call once per thread before using FASTER
@@ -36,8 +59,8 @@ namespace FASTER.core
         [Obsolete("Use NewSession() instead.")]
         public Guid StartSession()
         {
-            if (threadCtx == null)
-                threadCtx = new FastThreadLocal<FasterExecutionContext>();
+            if (_threadCtx == null)
+                _threadCtx = new FastThreadLocal<FasterKV<Key, Value, Input, Output, Context>.FasterExecutionContext>();
 
             return InternalAcquire();
         }
@@ -52,8 +75,8 @@ namespace FASTER.core
         {
             StartSession();
 
-            var cp = InternalContinue(guid.ToString(), out FasterExecutionContext ctx);
-            threadCtx.Value = ctx;
+            var cp = _fasterKV.InternalContinue(guid.ToString(), out var ctx);
+            _threadCtx.Value = ctx;
 
             return cp;
         }
@@ -64,7 +87,7 @@ namespace FASTER.core
         [Obsolete("Use and dispose NewSession() instead.")]
         public void StopSession()
         {
-            InternalRelease(this.threadCtx.Value);
+            InternalRelease(this._threadCtx.Value);
         }
 
         /// <summary>
@@ -73,9 +96,8 @@ namespace FASTER.core
         [Obsolete("Use NewSession(), where Refresh() is not required by default.")]
         public void Refresh()
         {
-            InternalRefresh(threadCtx.Value);
+            _fasterKV.InternalRefresh(_threadCtx.Value, _functions);
         }
-
 
         /// <summary>
         ///  Legacy API: Complete all pending operations issued by this session
@@ -85,7 +107,7 @@ namespace FASTER.core
         [Obsolete("Use NewSession() and invoke CompletePending() on the session.")]
         public bool CompletePending(bool wait = false)
         {
-            return InternalCompletePending(threadCtx.Value, wait);
+            return _fasterKV.InternalCompletePending(_threadCtx.Value, _functions, wait);
         }
 
         /// <summary>
@@ -100,7 +122,7 @@ namespace FASTER.core
         [Obsolete("Use NewSession() and invoke Read() on the session.")]
         public Status Read(ref Key key, ref Input input, ref Output output, Context context, long serialNo)
         {
-            return ContextRead(ref key, ref input, ref output, context, serialNo, threadCtx.Value);
+            return _fasterKV.ContextRead(ref key, ref input, ref output, context, _functions, serialNo, _threadCtx.Value);
         }
 
         /// <summary>
@@ -114,7 +136,7 @@ namespace FASTER.core
         [Obsolete("Use NewSession() and invoke Upsert() on the session.")]
         public Status Upsert(ref Key key, ref Value value, Context context, long serialNo)
         {
-            return ContextUpsert(ref key, ref value, context, serialNo, threadCtx.Value);
+            return _fasterKV.ContextUpsert(ref key, ref value, context, _functions, serialNo, _threadCtx.Value);
         }
 
         /// <summary>
@@ -128,7 +150,7 @@ namespace FASTER.core
         [Obsolete("Use NewSession() and invoke RMW() on the session.")]
         public Status RMW(ref Key key, ref Input input, Context context, long serialNo)
         {
-            return ContextRMW(ref key, ref input, context, serialNo, threadCtx.Value);
+            return _fasterKV.ContextRMW(ref key, ref input, context, _functions, serialNo, _threadCtx.Value);
         }
 
         /// <summary>
@@ -144,7 +166,7 @@ namespace FASTER.core
         [Obsolete("Use NewSession() and invoke Delete() on the session.")]
         public Status Delete(ref Key key, Context context, long serialNo)
         {
-            return ContextDelete(ref key, context, serialNo, threadCtx.Value);
+            return _fasterKV.ContextDelete(ref key, context, _functions, serialNo, _threadCtx.Value);
         }
 
         /// <summary>
@@ -157,7 +179,7 @@ namespace FASTER.core
         {
             if (!InLegacySession())
             {
-                CompleteCheckpointAsync().GetAwaiter().GetResult();
+                _fasterKV.CompleteCheckpointAsync().GetAwaiter().GetResult();
                 return true;
             }
 
@@ -168,7 +190,7 @@ namespace FASTER.core
             do
             {
                 CompletePending();
-                if (_systemState.phase == Phase.REST)
+                if (_fasterKV._systemState.phase == Phase.REST)
                 {
                     CompletePending();
                     return true;
@@ -180,25 +202,25 @@ namespace FASTER.core
 
         private Guid InternalAcquire()
         {
-            epoch.Resume();
-            threadCtx.InitializeThread();
-            Phase phase = _systemState.phase;
+            _fasterKV.epoch.Resume();
+            _threadCtx.InitializeThread();
+            Phase phase = _fasterKV._systemState.phase;
             if (phase != Phase.REST)
             {
                 throw new FasterException("Can acquire only in REST phase!");
             }
             Guid guid = Guid.NewGuid();
-            threadCtx.Value = new FasterExecutionContext();
-            InitContext(threadCtx.Value, guid.ToString());
+            _threadCtx.Value = new FasterKV<Key, Value, Input, Output, Context>.FasterExecutionContext();
+            _fasterKV.InitContext(_threadCtx.Value, guid.ToString());
 
-            threadCtx.Value.prevCtx = new FasterExecutionContext();
-            InitContext(threadCtx.Value.prevCtx, guid.ToString());
-            threadCtx.Value.prevCtx.version--;
-            InternalRefresh(threadCtx.Value);
+            _threadCtx.Value.prevCtx = new FasterKV<Key, Value, Input, Output, Context>.FasterExecutionContext();
+            _fasterKV.InitContext(_threadCtx.Value.prevCtx, guid.ToString());
+            _threadCtx.Value.prevCtx.version--;
+            _fasterKV.InternalRefresh(_threadCtx.Value, _functions);
             return guid;
         }
 
-        private void InternalRelease(FasterExecutionContext ctx)
+        private void InternalRelease(FasterKV<Key, Value, Input, Output, Context>.FasterExecutionContext ctx)
         {
             Debug.Assert(ctx.HasNoPendingRequests);
             if (ctx.prevCtx != null)
@@ -207,7 +229,37 @@ namespace FASTER.core
             }
             Debug.Assert(ctx.phase == Phase.REST);
 
-            epoch.Suspend();
+            _fasterKV.epoch.Suspend();
         }
+
+        public void Dispose()
+        {
+            _fasterKV.Dispose();
+            LegacyDispose();
+        }
+
+        public ClientSession<Key, Value, Input, Output, Context, Functions> NewSession(string sessionId = null, bool threadAffinitized = false)
+            => _fasterKV.NewSession(_functions, sessionId, threadAffinitized);
+
+        public ClientSession<Key, Value, Input, Output, Context, Functions> ResumeSession(string sessionId, out CommitPoint commitPoint, bool threadAffinitized = false)
+            => _fasterKV.ResumeSession(_functions, sessionId, out commitPoint, threadAffinitized);
+
+        public bool GrowIndex() => _fasterKV.GrowIndex();
+
+        public bool TakeFullCheckpoint(out Guid token, long targetVersion = -1) => _fasterKV.TakeFullCheckpoint(out token, targetVersion);
+
+        public bool TakeIndexCheckpoint(out Guid token) => _fasterKV.TakeIndexCheckpoint(out token);
+
+        public bool TakeHybridLogCheckpoint(out Guid token, long targetVersion = -1) => _fasterKV.TakeHybridLogCheckpoint(out token, targetVersion);
+
+        public void Recover() => _fasterKV.Recover();
+
+        public void Recover(Guid fullcheckpointToken) => _fasterKV.Recover(fullcheckpointToken);
+
+        public void Recover(Guid indexToken, Guid hybridLogToken) => _fasterKV.Recover(indexToken, hybridLogToken);
+
+        public ValueTask CompleteCheckpointAsync(CancellationToken token = default(CancellationToken)) => _fasterKV.CompleteCheckpointAsync(token);
+
+        public string DumpDistribution() => _fasterKV.DumpDistribution();
     }
 }

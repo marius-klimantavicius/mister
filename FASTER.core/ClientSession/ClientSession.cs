@@ -11,6 +11,11 @@ using System.Threading.Tasks;
 
 namespace FASTER.core
 {
+    internal interface IClientSession
+    {
+        void AtomicSwitch(int version);
+    }
+
     /// <summary>
     /// Thread-independent session interface to FASTER
     /// </summary>
@@ -20,23 +25,27 @@ namespace FASTER.core
     /// <typeparam name="Output"></typeparam>
     /// <typeparam name="Context"></typeparam>
     /// <typeparam name="Functions"></typeparam>
-    public sealed class ClientSession<Key, Value, Input, Output, Context, Functions> : IDisposable
+    public sealed class ClientSession<Key, Value, Input, Output, Context, Functions> : IClientSession, IDisposable
         where Key : new()
         where Value : new()
         where Functions : IFunctions<Key, Value, Input, Output, Context>
     {
         internal readonly bool SupportAsync = false;
-        private readonly FasterKV<Key, Value, Input, Output, Context, Functions> fht;
-        internal readonly FasterKV<Key, Value, Input, Output, Context, Functions>.FasterExecutionContext ctx;
+        private readonly FasterKV<Key, Value, Input, Output, Context> fht;
+        internal readonly FasterKV<Key, Value, Input, Output, Context>.FasterExecutionContext ctx;
         internal CommitPoint LatestCommitPoint;
 
+        internal Functions functions;
+
         internal ClientSession(
-            FasterKV<Key, Value, Input, Output, Context, Functions> fht,
-            FasterKV<Key, Value, Input, Output, Context, Functions>.FasterExecutionContext ctx,
+            FasterKV<Key, Value, Input, Output, Context> fht,
+            FasterKV<Key, Value, Input, Output, Context>.FasterExecutionContext ctx,
+            Functions functions,
             bool supportAsync)
         {
             this.fht = fht;
             this.ctx = ctx;
+            this.functions = functions;
             this.SupportAsync = supportAsync;
             LatestCommitPoint = new CommitPoint { UntilSerialNo = -1, ExcludedSerialNos = null };
             // Session runs on a single thread
@@ -76,7 +85,7 @@ namespace FASTER.core
             if (SupportAsync) UnsafeResumeThread();
             try
             {
-                return fht.ContextRead(ref key, ref input, ref output, userContext, serialNo, ctx);
+                return fht.ContextRead(ref key, ref input, ref output, userContext, functions, serialNo, ctx);
             }
             finally
             {
@@ -94,7 +103,7 @@ namespace FASTER.core
         /// <param name="token"></param>
         /// <returns>ReadAsyncResult - call CompleteRead on the return value to complete the read operation</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public ValueTask<FasterKV<Key, Value, Input, Output, Context, Functions>.ReadAsyncResult> ReadAsync(ref Key key, ref Input input, Context context = default, CancellationToken token = default)
+        public ValueTask<FasterKV<Key, Value, Input, Output, Context>.ReadAsyncResult<Functions>> ReadAsync(ref Key key, ref Input input, Context context = default, CancellationToken token = default)
         {
             return fht.ReadAsync(this, ref key, ref input, context, token);
         }        
@@ -113,7 +122,7 @@ namespace FASTER.core
             if (SupportAsync) UnsafeResumeThread();
             try
             {
-                return fht.ContextUpsert(ref key, ref desiredValue, userContext, serialNo, ctx);
+                return fht.ContextUpsert(ref key, ref desiredValue, userContext, functions, serialNo, ctx);
             }
             finally
             {
@@ -163,7 +172,7 @@ namespace FASTER.core
             if (SupportAsync) UnsafeResumeThread();
             try
             {
-                return fht.ContextRMW(ref key, ref input, userContext, serialNo, ctx);
+                return fht.ContextRMW(ref key, ref input, userContext, functions, serialNo, ctx);
             }
             finally
             {
@@ -214,7 +223,7 @@ namespace FASTER.core
             if (SupportAsync) UnsafeResumeThread();
             try
             {
-                return fht.ContextDelete(ref key, userContext, serialNo, ctx);
+                return fht.ContextDelete(ref key, userContext, functions, serialNo, ctx);
             }
             finally
             {
@@ -261,7 +270,7 @@ namespace FASTER.core
         /// <returns>Status</returns>
         internal Status ContainsKeyInMemory(ref Key key, long fromAddress = -1)
         {
-            return fht.InternalContainsKeyInMemory(ref key, ctx, fromAddress);
+            return fht.InternalContainsKeyInMemory(ref key, functions, ctx, fromAddress);
         }
 
         /// <summary>
@@ -290,7 +299,7 @@ namespace FASTER.core
         public void Refresh()
         {
             if (SupportAsync) UnsafeResumeThread();
-            fht.InternalRefresh(ctx, this);
+            fht.InternalRefresh(ctx, functions, this);
             if (SupportAsync) UnsafeSuspendThread();
         }
 
@@ -305,7 +314,7 @@ namespace FASTER.core
             if (SupportAsync) UnsafeResumeThread();
             try
             {
-                var result = fht.InternalCompletePending(ctx, spinWait);
+                var result = fht.InternalCompletePending(ctx, functions, spinWait);
                 if (spinWaitForCommit)
                 {
                     if (spinWait != true)
@@ -314,10 +323,10 @@ namespace FASTER.core
                     }
                     do
                     {
-                        fht.InternalCompletePending(ctx, spinWait);
+                        fht.InternalCompletePending(ctx, functions, spinWait);
                         if (fht.InRestPhase())
                         {
-                            fht.InternalCompletePending(ctx, spinWait);
+                            fht.InternalCompletePending(ctx, functions, spinWait);
                             return true;
                         }
                     } while (spinWait);
@@ -387,7 +396,7 @@ namespace FASTER.core
         internal void UnsafeResumeThread()
         {
             fht.epoch.Resume();
-            fht.InternalRefresh(ctx, this);
+            fht.InternalRefresh(ctx, functions, this);
         }
 
         /// <summary>
@@ -399,5 +408,9 @@ namespace FASTER.core
             fht.epoch.Suspend();
         }
 
+        public void AtomicSwitch(int version)
+        {
+            fht.AtomicSwitch(ctx, ctx.prevCtx, version);
+        }
     }
 }
