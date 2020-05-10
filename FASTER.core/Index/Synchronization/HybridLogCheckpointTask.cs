@@ -50,7 +50,7 @@ namespace FASTER.core
                             kvp.Value.AtomicSwitch(next.version - 1);
                         }
                     }
-                    
+
                     faster.WriteHybridLogMetaInfo();
                     break;
                 case Phase.REST:
@@ -187,6 +187,29 @@ namespace FASTER.core
             if (faster.epoch.CheckIsComplete(EpochPhaseIdx.WaitFlush, current.version))
                 faster.GlobalStateMachineStep(current);
         }
+
+        public override async ValueTask OnThreadState<Key, Value, Input, Output, Context>(SystemState current, SystemState prev, FasterKV<Key, Value, Input, Output, Context> faster, CancellationToken token = default(CancellationToken))
+        {
+            await base.OnThreadState(current, prev, faster, token);
+            if (current.phase != Phase.WAIT_FLUSH) return;
+
+            var notify = faster.hlog.FlushedUntilAddress >=
+                         faster._hybridLogCheckpoint.info.finalLogicalAddress;
+
+            if (!notify)
+            {
+                Debug.Assert(faster._hybridLogCheckpoint.flushedSemaphore != null);
+                await faster._hybridLogCheckpoint.flushedSemaphore.WaitAsync(token);
+                faster._hybridLogCheckpoint.flushedSemaphore.Release();
+                notify = true;
+            }
+
+            if (!notify) return;
+
+
+            if (faster.epoch.CheckIsComplete(EpochPhaseIdx.WaitFlush, current.version))
+                faster.GlobalStateMachineStep(current);
+        }
     }
 
     /// <summary>
@@ -266,13 +289,35 @@ namespace FASTER.core
                 }
 
                 if (!notify) return;
-                
+
                 if (ctx != null)
                     ctx.prevCtx.markers[EpochPhaseIdx.WaitFlush] = true;
             }
 
             if (ctx != null)
                 faster.epoch.Mark(EpochPhaseIdx.WaitFlush, current.version);
+
+            if (faster.epoch.CheckIsComplete(EpochPhaseIdx.WaitFlush, current.version))
+                faster.GlobalStateMachineStep(current);
+        }
+
+        public override async ValueTask OnThreadState<Key, Value, Input, Output, Context>(SystemState current, SystemState prev, FasterKV<Key, Value, Input, Output, Context> faster, CancellationToken token = default(CancellationToken))
+        {
+            await base.OnThreadState(current, prev, faster, token);
+            if (current.phase != Phase.WAIT_FLUSH) return;
+
+            var notify = faster._hybridLogCheckpoint.flushedSemaphore != null &&
+                         faster._hybridLogCheckpoint.flushedSemaphore.CurrentCount > 0;
+
+            if (!notify)
+            {
+                Debug.Assert(faster._hybridLogCheckpoint.flushedSemaphore != null);
+                await faster._hybridLogCheckpoint.flushedSemaphore.WaitAsync(token);
+                faster._hybridLogCheckpoint.flushedSemaphore.Release();
+                notify = true;
+            }
+
+            if (!notify) return;
 
             if (faster.epoch.CheckIsComplete(EpochPhaseIdx.WaitFlush, current.version))
                 faster.GlobalStateMachineStep(current);
@@ -291,7 +336,7 @@ namespace FASTER.core
         /// <param name="checkpointBackend">A task that encapsulates the logic to persist the checkpoint</param>
         /// <param name="targetVersion">upper limit (inclusive) of the version included</param>
         public HybridLogCheckpointStateMachine(ISynchronizationTask checkpointBackend, long targetVersion = -1)
-            : base(targetVersion, new VersionChangeTask(), checkpointBackend) {}
+            : base(targetVersion, new VersionChangeTask(), checkpointBackend) { }
 
         /// <summary>
         /// Construct a new HybridLogCheckpointStateMachine with the given tasks. Does not load any tasks by default.
@@ -299,7 +344,7 @@ namespace FASTER.core
         /// <param name="targetVersion">upper limit (inclusive) of the version included</param>
         /// <param name="tasks">The tasks to load onto the state machine</param>
         protected HybridLogCheckpointStateMachine(long targetVersion, params ISynchronizationTask[] tasks)
-            : base(targetVersion, tasks) {}
+            : base(targetVersion, tasks) { }
 
         /// <inheritdoc />
         public override SystemState NextState(SystemState start)
