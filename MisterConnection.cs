@@ -200,7 +200,7 @@ namespace Marius.Mister
         where TFunctions : IFunctions<TKeyAtom, TValueAtom, byte[], TValue, object>
         where TFaster : IFasterKV<TKeyAtom, TValueAtom, byte[], TValue, object, TFunctions>
     {
-        private class MisterSession : IMisterSession<TKey, TValue>
+        private sealed class MisterSession : IMisterSession<TKey, TValue>
         {
             private readonly MisterConnection<TKey, TValue, TKeyAtom, TKeyAtomSource, TValueAtom, TValueAtomSource, TFunctions, TFaster> _connection;
             private readonly ClientSession<TKeyAtom, TValueAtom, byte[], TValue, object, TFunctions> _session;
@@ -294,9 +294,10 @@ namespace Marius.Mister
 
         private readonly object _lock = new object();
 
-        private MisterSession _sessionRoot;
-        private MisterSession _sessionCache;
+        private readonly int _sessionPoolSize = Environment.ProcessorCount * 2;
+        private readonly ConcurrentBag<MisterSession> _sessionPool = new ConcurrentBag<MisterSession>();
 
+        private MisterSession _sessionRoot;
         private int _sessionsStarted;
 
         protected TFaster _faster;
@@ -383,9 +384,7 @@ namespace Marius.Mister
             }
             finally
             {
-                var current = Interlocked.CompareExchange(ref _sessionCache, session, null);
-                if (current != null)
-                    session.Dispose();
+                ReturnOrDisposeSession(session);
             }
         }
 
@@ -398,9 +397,7 @@ namespace Marius.Mister
             }
             finally
             {
-                var current = Interlocked.CompareExchange(ref _sessionCache, session, null);
-                if (current != null)
-                    session.Dispose();
+                ReturnOrDisposeSession(session);
             }
         }
 
@@ -413,9 +410,7 @@ namespace Marius.Mister
             }
             finally
             {
-                var current = Interlocked.CompareExchange(ref _sessionCache, session, null);
-                if (current != null)
-                    session.Dispose();
+                ReturnOrDisposeSession(session);
             }
         }
 
@@ -475,11 +470,7 @@ namespace Marius.Mister
         {
             CheckDisposed();
 
-            var existing = default(MisterSession);
-            if (string.IsNullOrEmpty(sessionId))
-                existing = Interlocked.Exchange(ref _sessionCache, null);
-
-            if (existing != null)
+            if (string.IsNullOrEmpty(sessionId) && _sessionPool.TryTake(out var existing))
                 return existing;
 
             lock (_lock)
@@ -500,6 +491,14 @@ namespace Marius.Mister
                 Interlocked.Increment(ref _sessionsStarted);
                 return newSession;
             }
+        }
+
+        private void ReturnOrDisposeSession(MisterSession session)
+        {
+            if (_sessionPool.Count < _sessionPoolSize)
+                _sessionPool.Add(session);
+            else
+                session.Dispose();
         }
 
         private void RemoveSession(MisterSession session)

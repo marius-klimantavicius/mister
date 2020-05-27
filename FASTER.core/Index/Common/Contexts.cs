@@ -6,6 +6,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 
@@ -356,10 +357,10 @@ namespace FASTER.core
             Debug.WriteLine("Begin Address: {0}", beginAddress);
             Debug.WriteLine("Num sessions recovered: {0}", continueTokens.Count);
             Debug.WriteLine("Recovered sessions: ");
-            foreach (var sessionInfo in continueTokens)
-            {
+            foreach (var sessionInfo in continueTokens.Take(10))
                 Debug.WriteLine("{0}: {1}", sessionInfo.Key, sessionInfo.Value);
-            }
+            if (continueTokens.Count > 10) 
+                Debug.WriteLine("...");
         }
     }
 

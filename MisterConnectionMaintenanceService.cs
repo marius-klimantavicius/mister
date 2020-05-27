@@ -151,12 +151,8 @@ namespace Marius.Mister
             {
                 _currentCheckpointVersion = newCheckpoint;
 
-                var token = default(Guid);
-                using (var session = _faster.NewSession(threadAffinitized: true))
-                {
-                    _faster.TakeFullCheckpoint(out token);
-                    session.CompletePending(true, true);
-                }
+                _faster.TakeFullCheckpoint(out var token);
+                _faster.CompleteCheckpointAsync().GetAwaiter().GetResult();
 
                 _takenCheckpoints[_takenCount++] = token;
                 if (_takenCount >= _takenCheckpoints.Length)
