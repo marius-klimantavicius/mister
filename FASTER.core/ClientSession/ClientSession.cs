@@ -1,4 +1,4 @@
-﻿// Copyright (c) Microsoft Corporation. All rights reserved.
+// Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT license.
 
 #pragma warning disable 0162
@@ -97,7 +97,7 @@ namespace FASTER.core
         public ValueTask<FasterKV<Key, Value, Input, Output, Context, Functions>.ReadAsyncResult> ReadAsync(ref Key key, ref Input input, Context context = default, CancellationToken token = default)
         {
             return fht.ReadAsync(this, ref key, ref input, context, token);
-        }        
+        }
 
         /// <summary>
         /// Upsert operation
@@ -295,7 +295,8 @@ namespace FASTER.core
         }
 
         /// <summary>
-        /// Sync complete outstanding pending operations
+        /// Sync complete all outstanding pending operations
+        /// Async operations (ReadAsync) must be completed individually
         /// </summary>
         /// <param name="spinWait">Spin-wait for all pending operations on session to complete</param>
         /// <param name="spinWaitForCommit">Extend spin-wait until ongoing commit/checkpoint, if any, completes</param>
@@ -348,6 +349,22 @@ namespace FASTER.core
             // Wait for commit if necessary
             if (waitForCommit)
                 await WaitForCommitAsync(token);
+        }
+
+        /// <summary>
+        /// Check if at least one request is ready for CompletePending to be called on
+        /// Returns completed immediately if there are no outstanding requests
+        /// </summary>
+        /// <param name="token"></param>
+        /// <returns></returns>
+        public async ValueTask ReadyToCompletePendingAsync(CancellationToken token = default)
+        {
+            token.ThrowIfCancellationRequested();
+
+            if (fht.epoch.ThisInstanceProtected())
+                throw new NotSupportedException("Async operations not supported over protected epoch");
+
+            await fht.ReadyToCompletePendingAsync(this, token);
         }
 
         /// <summary>

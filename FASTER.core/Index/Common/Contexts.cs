@@ -104,14 +104,16 @@ namespace FASTER.core
             public AsyncCountDown pendingReads;
             public AsyncQueue<AsyncIOContext<Key, Value>> readyResponses;
             public List<long> excludedSerialNos;
+            public int asyncPendingCount;
+
+            public int SyncIoPendingCount => ioPendingRequests.Count - asyncPendingCount;
 
             public bool HasNoPendingRequests
             {
                 [MethodImpl(MethodImplOptions.AggressiveInlining)]
                 get
                 {
-                    return ioPendingRequests.Count == 0
-                        && retryRequests.Count == 0;
+                    return SyncIoPendingCount == 0 && retryRequests.Count == 0;
                 }
             }
 
@@ -359,7 +361,7 @@ namespace FASTER.core
             Debug.WriteLine("Recovered sessions: ");
             foreach (var sessionInfo in continueTokens.Take(10))
                 Debug.WriteLine("{0}: {1}", sessionInfo.Key, sessionInfo.Value);
-            if (continueTokens.Count > 10) 
+            if (continueTokens.Count > 10)
                 Debug.WriteLine("...");
         }
     }
