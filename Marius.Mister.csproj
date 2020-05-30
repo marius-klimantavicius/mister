@@ -147,15 +147,12 @@
     <Compile Include="FASTER.core\Utilities\Status.cs" />
     <Compile Include="FASTER.core\Utilities\Utility.cs" />
     <Compile Include="IMisterConnection.cs" />
-    <Compile Include="IMisterNotifyCompletion.cs" />
-    <Compile Include="IMisterNotifyCompletion1.cs" />
     <Compile Include="IMisterObjectSerializer.cs" />
     <Compile Include="IMisterAtomSource.cs" />
     <Compile Include="IMisterSession.cs" />
     <Compile Include="IMisterStreamManager.cs" />
     <Compile Include="IMisterStreamSerializer.cs" />
     <Compile Include="IMisterSerializer.cs" />
-    <Compile Include="IMisterThreadConnection.cs" />
     <Compile Include="MisterArrayPoolStream.cs" />
     <Compile Include="MisterArrayPoolObjectSource.cs" />
     <Compile Include="MisterArrayPoolStreamManager.cs" />

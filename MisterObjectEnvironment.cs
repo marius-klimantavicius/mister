@@ -1,12 +1,13 @@
 ﻿using System;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using FASTER.core;
 
 namespace Marius.Mister
 {
-    public unsafe class MisterObjectEnvironment<TValue, TValueAtomSource> : IFunctions<MisterObject, MisterObject, byte[], TValue, object>
+    public unsafe struct MisterObjectEnvironment<TValue, TValueAtomSource> : IFunctions<MisterObject, MisterObject, byte[], TValue, object>
         where TValueAtomSource : struct, IMisterAtomSource<MisterObject>
     {
         private readonly IMisterSerializer<TValue, MisterObject, TValueAtomSource> _serializer;
@@ -30,6 +31,7 @@ namespace Marius.Mister
         {
             var length = src.Length;
             dst.Length = length;
+            
             fixed (byte* source = &src.Data, destination = &dst.Data)
             {
                 Buffer.MemoryCopy(source, destination, length, length);
@@ -62,23 +64,10 @@ namespace Marius.Mister
 
         public void DeleteCompletionCallback(ref MisterObject key, object ctx)
         {
-            if (ctx == null)
-                return;
-
-            var tcs = Unsafe.As<IMisterNotifyCompletion>(ctx);
-            tcs.SetResult();
         }
 
         public void ReadCompletionCallback(ref MisterObject key, ref byte[] input, ref TValue output, object ctx, Status status)
         {
-            if (ctx == null)
-                return;
-
-            var tcs = Unsafe.As<IMisterNotifyCompletion<TValue>>(ctx);
-            if (status == Status.ERROR)
-                tcs.SetException(new Exception());
-            else
-                tcs.SetResult(output);
         }
 
         public void RMWCompletionCallback(ref MisterObject key, ref byte[] input, object ctx, Status status)
@@ -87,11 +76,6 @@ namespace Marius.Mister
 
         public void UpsertCompletionCallback(ref MisterObject key, ref MisterObject value, object ctx)
         {
-            if (ctx == null)
-                return;
-
-            var tcs = Unsafe.As<IMisterNotifyCompletion>(ctx);
-            tcs.SetResult();
         }
     }
 }
