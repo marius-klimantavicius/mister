@@ -6,7 +6,7 @@
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
     <ProjectGuid>{6475E528-3361-47F0-9DD5-7883ED89C207}</ProjectGuid>
     <OutputType>Exe</OutputType>
-    <RootNamespace>Marius.Mister</RootNamespace>
+    <RootNamespace>Marius</RootNamespace>
     <AssemblyName>Marius.Mister</AssemblyName>
     <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
@@ -146,31 +146,31 @@
     <Compile Include="FASTER.core\Utilities\SafeConcurrentDictionary.cs" />
     <Compile Include="FASTER.core\Utilities\Status.cs" />
     <Compile Include="FASTER.core\Utilities\Utility.cs" />
-    <Compile Include="IMisterConnection.cs" />
-    <Compile Include="IMisterObjectSerializer.cs" />
-    <Compile Include="IMisterAtomSource.cs" />
-    <Compile Include="IMisterSession.cs" />
-    <Compile Include="IMisterStreamManager.cs" />
-    <Compile Include="IMisterStreamSerializer.cs" />
-    <Compile Include="IMisterSerializer.cs" />
-    <Compile Include="MisterArrayPoolStream.cs" />
-    <Compile Include="MisterArrayPoolObjectSource.cs" />
-    <Compile Include="MisterArrayPoolStreamManager.cs" />
-    <Compile Include="MisterConnection.cs" />
-    <Compile Include="MisterConnectionMaintenanceService.cs" />
-    <Compile Include="MisterConnectionSettings.cs" />
-    <Compile Include="MisterObjectLongSerializer.cs" />
-    <Compile Include="MisterObjectStringUtf8Serializer.cs" />
-    <Compile Include="MisterStreamLongSerializer.cs" />
-    <Compile Include="MisterObject.cs" />
-    <Compile Include="MisterObjectEnvironment.cs" />
-    <Compile Include="MisterObjectEqualityComparer.cs" />
-    <Compile Include="MisterObjectVariableLengthStruct.cs" />
-    <Compile Include="MisterStreamObjectSource.cs" />
-    <Compile Include="MisterStreamSerializer.cs" />
-    <Compile Include="MisterStreamStringSerializer.cs" />
-    <Compile Include="MisterObjectStringSerializer.cs" />
-    <Compile Include="MisterVoid.cs" />
+    <Compile Include="Mister\IMisterConnection.cs" />
+    <Compile Include="Mister\IMisterObjectSerializer.cs" />
+    <Compile Include="Mister\IMisterAtomSource.cs" />
+    <Compile Include="Mister\IMisterSession.cs" />
+    <Compile Include="Mister\IMisterStreamManager.cs" />
+    <Compile Include="Mister\IMisterStreamSerializer.cs" />
+    <Compile Include="Mister\IMisterSerializer.cs" />
+    <Compile Include="Mister\MisterArrayPoolStream.cs" />
+    <Compile Include="Mister\MisterArrayPoolObjectSource.cs" />
+    <Compile Include="Mister\MisterArrayPoolStreamManager.cs" />
+    <Compile Include="Mister\MisterConnection.cs" />
+    <Compile Include="Mister\MisterConnectionMaintenanceService.cs" />
+    <Compile Include="Mister\MisterConnectionSettings.cs" />
+    <Compile Include="Mister\MisterObjectLongSerializer.cs" />
+    <Compile Include="Mister\MisterObjectStringUtf8Serializer.cs" />
+    <Compile Include="Mister\MisterStreamLongSerializer.cs" />
+    <Compile Include="Mister\MisterObject.cs" />
+    <Compile Include="Mister\MisterObjectEnvironment.cs" />
+    <Compile Include="Mister\MisterObjectEqualityComparer.cs" />
+    <Compile Include="Mister\MisterObjectVariableLengthStruct.cs" />
+    <Compile Include="Mister\MisterStreamObjectSource.cs" />
+    <Compile Include="Mister\MisterStreamSerializer.cs" />
+    <Compile Include="Mister\MisterStreamStringSerializer.cs" />
+    <Compile Include="Mister\MisterObjectStringSerializer.cs" />
+    <Compile Include="Mister\MisterVoid.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
@@ -208,5 +208,6 @@
       <Version>4.5.3</Version>
     </PackageReference>
   </ItemGroup>
+  <ItemGroup />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
