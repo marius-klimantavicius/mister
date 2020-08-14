@@ -81,6 +81,7 @@
     <Compile Include="FASTER.core\ClientSession\ClientSession.cs" />
     <Compile Include="FASTER.core\ClientSession\FASTERAsync.cs" />
     <Compile Include="FASTER.core\ClientSession\FASTERClientSession.cs" />
+    <Compile Include="FASTER.core\ClientSession\IClientSession.cs" />
     <Compile Include="FASTER.core\Device\Devices.cs" />
     <Compile Include="FASTER.core\Device\FixedPool.cs" />
     <Compile Include="FASTER.core\Device\IDevice.cs" />
@@ -98,6 +99,7 @@
     <Compile Include="FASTER.core\Index\Common\HeapContainer.cs" />
     <Compile Include="FASTER.core\Index\Common\LogSettings.cs" />
     <Compile Include="FASTER.core\Index\Common\RecordInfo.cs" />
+    <Compile Include="FASTER.core\Index\Common\VariableLengthStruct.cs" />
     <Compile Include="FASTER.core\Index\FasterLog\CommitFailureException.cs" />
     <Compile Include="FASTER.core\Index\FasterLog\CommitInfo.cs" />
     <Compile Include="FASTER.core\Index\FasterLog\FasterLog.cs" />
@@ -111,14 +113,19 @@
     <Compile Include="FASTER.core\Index\FASTER\FASTER.cs" />
     <Compile Include="FASTER.core\Index\FASTER\FASTERBase.cs" />
     <Compile Include="FASTER.core\Index\FASTER\FASTERImpl.cs" />
+    <Compile Include="FASTER.core\Index\FASTER\FASTERIterator.cs" />
     <Compile Include="FASTER.core\Index\FASTER\FASTERLegacy.cs" />
     <Compile Include="FASTER.core\Index\FASTER\FASTERThread.cs" />
     <Compile Include="FASTER.core\Index\FASTER\LogAccessor.cs" />
+    <Compile Include="FASTER.core\Index\FASTER\LogCompactionFunctions.cs" />
     <Compile Include="FASTER.core\Index\Interfaces\FunctionsBase.cs" />
+    <Compile Include="FASTER.core\Index\Interfaces\ICompactionFunctions.cs" />
     <Compile Include="FASTER.core\Index\Interfaces\IFasterEqualityComparer.cs" />
     <Compile Include="FASTER.core\Index\Interfaces\IFasterKV.cs" />
+    <Compile Include="FASTER.core\Index\Interfaces\IFasterSession.cs" />
     <Compile Include="FASTER.core\Index\Interfaces\IFunctions.cs" />
     <Compile Include="FASTER.core\Index\Interfaces\IObjectSerializer.cs" />
+    <Compile Include="FASTER.core\Index\Interfaces\NullFasterSession.cs" />
     <Compile Include="FASTER.core\Index\Recovery\Checkpoint.cs" />
     <Compile Include="FASTER.core\Index\Recovery\DirectoryConfiguration.cs" />
     <Compile Include="FASTER.core\Index\Recovery\ICheckpointManager.cs" />

@@ -153,14 +153,18 @@ namespace Marius.Mister
             MisterObject,
             TValueAtomSource,
             MisterObjectEnvironment<TValue, TValueAtomSource>,
-            FasterKV<MisterObject, MisterObject, byte[], TValue, object, MisterObjectEnvironment<TValue, TValueAtomSource>>
+            FasterKV<MisterObject, MisterObject>
         >
         where TKeyAtomSource : struct, IMisterAtomSource<MisterObject>
         where TValueAtomSource : struct, IMisterAtomSource<MisterObject>
     {
+        private readonly MisterObjectEnvironment<TValue, TValueAtomSource> _environment;
+
         public MisterConnection(DirectoryInfo directory, IMisterSerializer<TKey, MisterObject, TKeyAtomSource> keySerializer, IMisterSerializer<TValue, MisterObject, TValueAtomSource> valueSerializer, MisterConnectionSettings settings = null, string name = null)
             : base(directory, keySerializer, valueSerializer, settings, name)
         {
+            _environment = new MisterObjectEnvironment<TValue, TValueAtomSource>(valueSerializer);
+
             Initialize();
         }
 
@@ -172,7 +176,6 @@ namespace Marius.Mister
             if (_mainDevice != null)
                 _mainDevice.Close();
 
-            var environment = new MisterObjectEnvironment<TValue, TValueAtomSource>(_valueSerializer);
             var variableLengthStructSettings = new VariableLengthStructSettings<MisterObject, MisterObject>()
             {
                 keyLength = MisterObjectVariableLengthStruct.Instance,
@@ -180,15 +183,19 @@ namespace Marius.Mister
             };
 
             _mainDevice = Devices.CreateLogDevice(Path.Combine(_directory.FullName, @"hlog.log"));
-            _faster = new FasterKV<MisterObject, MisterObject, byte[], TValue, object, MisterObjectEnvironment<TValue, TValueAtomSource>>(
+            _faster = new FasterKV<MisterObject, MisterObject>(
                 _settings.IndexSize,
-                environment,
                 _settings.GetLogSettings(_mainDevice),
                 new CheckpointSettings() { CheckpointDir = _directory.FullName, CheckPointType = CheckpointType.FoldOver },
                 serializerSettings: null,
                 comparer: MisterObjectEqualityComparer.Instance,
                 variableLengthStructSettings: variableLengthStructSettings
             );
+        }
+
+        protected override ClientSession<MisterObject, MisterObject, byte[], TValue, object, MisterObjectEnvironment<TValue, TValueAtomSource>> NewSession(string sessionId)
+        {
+            return _faster.For<byte[], TValue, object>().NewSession(_environment, sessionId, false);
         }
     }
 
@@ -198,14 +205,16 @@ namespace Marius.Mister
         where TKeyAtomSource : struct, IMisterAtomSource<TKeyAtom>
         where TValueAtomSource : struct, IMisterAtomSource<TValueAtom>
         where TFunctions : IFunctions<TKeyAtom, TValueAtom, byte[], TValue, object>
-        where TFaster : IFasterKV<TKeyAtom, TValueAtom, byte[], TValue, object, TFunctions>
+        where TFaster : IFasterKV<TKeyAtom, TValueAtom>
     {
-        private sealed class MisterSession : IMisterSession<TKey, TValue>
+        protected sealed class MisterSession : IMisterSession<TKey, TValue>
         {
             private readonly MisterConnection<TKey, TValue, TKeyAtom, TKeyAtomSource, TValueAtom, TValueAtomSource, TFunctions, TFaster> _connection;
             private readonly ClientSession<TKeyAtom, TValueAtom, byte[], TValue, object, TFunctions> _session;
             private readonly CancellationToken _cancellationToken;
             private bool _isDisposed;
+
+            public ClientSession<TKeyAtom, TValueAtom, byte[], TValue, object, TFunctions> Session => _session;
 
             public MisterSession Prev;
             public MisterSession Next;
@@ -213,7 +222,7 @@ namespace Marius.Mister
             public MisterSession(MisterConnection<TKey, TValue, TKeyAtom, TKeyAtomSource, TValueAtom, TValueAtomSource, TFunctions, TFaster> connection, string sessionId = null)
             {
                 _connection = connection;
-                _session = _connection._faster.NewSession(sessionId);
+                _session = _connection.NewSession(sessionId);
 
                 _cancellationToken = _connection._cancellationTokenSource.Token;
 
@@ -440,6 +449,8 @@ namespace Marius.Mister
 
         protected abstract void Create();
 
+        protected abstract ClientSession<TKeyAtom, TValueAtom, byte[], TValue, object, TFunctions> NewSession(string sessionId);
+
         protected virtual MisterConnectionMaintenanceService<TValue, TKeyAtom, TValueAtom, TFunctions, TFaster> CreateMaintenanceService()
         {
             return new MisterConnectionMaintenanceService<TValue, TKeyAtom, TValueAtom, TFunctions, TFaster>(_directory, _settings.CheckpointIntervalMilliseconds, _settings.CheckpointCleanCount, _name);
@@ -466,7 +477,7 @@ namespace Marius.Mister
                 throw new ObjectDisposedException("MisterConnection");
         }
 
-        private MisterSession GetOrCreateSession(string sessionId = null)
+        protected MisterSession GetOrCreateSession(string sessionId = null)
         {
             CheckDisposed();
 
@@ -493,7 +504,7 @@ namespace Marius.Mister
             }
         }
 
-        private void ReturnOrDisposeSession(MisterSession session)
+        protected void ReturnOrDisposeSession(MisterSession session)
         {
             if (_sessionPool.Count < _sessionPoolSize)
                 _sessionPool.Add(session);

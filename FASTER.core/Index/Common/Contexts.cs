@@ -63,12 +63,11 @@ namespace FASTER.core
         }
     }
 
-    public partial class FasterKV<Key, Value, Input, Output, Context, Functions> : FasterBase, IFasterKV<Key, Value, Input, Output, Context, Functions>
+    public partial class FasterKV<Key, Value> : FasterBase, IFasterKV<Key, Value>
         where Key : new()
         where Value : new()
-        where Functions : IFunctions<Key, Value, Input, Output, Context>
     {
-        internal struct PendingContext
+        internal struct PendingContext<Input, Output, Context>
         {
             // User provided information
             internal OperationType type;
@@ -94,13 +93,13 @@ namespace FASTER.core
             }
         }
 
-        internal sealed class FasterExecutionContext : SerializedFasterExecutionContext
+        internal sealed class FasterExecutionContext<Input, Output, Context> : SerializedFasterExecutionContext
         {
             public Phase phase;
             public bool[] markers;
             public long totalPending;
-            public Queue<PendingContext> retryRequests;
-            public Dictionary<long, PendingContext> ioPendingRequests;
+            public Queue<PendingContext<Input, Output, Context>> retryRequests;
+            public Dictionary<long, PendingContext<Input, Output, Context>> ioPendingRequests;
             public AsyncCountDown pendingReads;
             public AsyncQueue<AsyncIOContext<Key, Value>> readyResponses;
             public List<long> excludedSerialNos;
@@ -117,7 +116,7 @@ namespace FASTER.core
                 }
             }
 
-            public FasterExecutionContext prevCtx;
+            public FasterExecutionContext<Input, Output, Context> prevCtx;
         }
     }
 
@@ -295,14 +294,6 @@ namespace FASTER.core
         }
 
         /// <summary>
-        /// Reset
-        /// </summary>
-        public void Reset()
-        {
-            Initialize(default, -1);
-        }
-
-        /// <summary>
         /// Write info to byte array
         /// </summary>
         public byte[] ToByteArray()
@@ -360,9 +351,12 @@ namespace FASTER.core
             Debug.WriteLine("Num sessions recovered: {0}", continueTokens.Count);
             Debug.WriteLine("Recovered sessions: ");
             foreach (var sessionInfo in continueTokens.Take(10))
+            {
                 Debug.WriteLine("{0}: {1}", sessionInfo.Key, sessionInfo.Value);
+            }
+
             if (continueTokens.Count > 10)
-                Debug.WriteLine("...");
+                Debug.WriteLine("... {0} skipped", continueTokens.Count - 10);
         }
     }
 
@@ -372,28 +366,29 @@ namespace FASTER.core
         public IDevice snapshotFileDevice;
         public IDevice snapshotFileObjectLogDevice;
         public SemaphoreSlim flushedSemaphore;
-        public long started;
 
         public void Initialize(Guid token, int _version, ICheckpointManager checkpointManager)
         {
             info.Initialize(token, _version);
-            started = 0;
             checkpointManager.InitializeLogCheckpoint(token);
         }
 
         public void Recover(Guid token, ICheckpointManager checkpointManager)
         {
             info.Recover(token, checkpointManager);
-            started = 0;
         }
 
         public void Reset()
         {
-            started = 0;
             flushedSemaphore = null;
-            info.Reset();
+            info = default;
             if (snapshotFileDevice != null) snapshotFileDevice.Close();
             if (snapshotFileObjectLogDevice != null) snapshotFileObjectLogDevice.Close();
+        }
+
+        public bool IsDefault()
+        {
+            return info.guid == default;
         }
     }
 
@@ -512,8 +507,13 @@ namespace FASTER.core
 
         public void Reset()
         {
-            info.Reset();
+            info = default;
             main_ht_device.Close();
+        }
+
+        public bool IsDefault()
+        {
+            return info.token == default;
         }
     }
 }

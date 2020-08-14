@@ -13,7 +13,7 @@ namespace Marius.Mister
         where TKeyAtom : new()
         where TValueAtom : new()
         where TFunctions : IFunctions<TKeyAtom, TValueAtom, byte[], TValue, object>
-        where TFaster : IFasterKV<TKeyAtom, TValueAtom, byte[], TValue, object, TFunctions>
+        where TFaster : IFasterKV<TKeyAtom, TValueAtom>
     {
         private struct MisterMaintenanceItem
         {
