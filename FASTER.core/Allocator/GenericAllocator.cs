@@ -23,8 +23,6 @@ namespace FASTER.core
 
 
     public unsafe sealed class GenericAllocator<Key, Value> : AllocatorBase<Key, Value>
-        where Key : new()
-        where Value : new()
     {
         // Circular buffer definition
         internal Record<Key, Value>[][] values;
@@ -48,12 +46,18 @@ namespace FASTER.core
 
             if ((!keyBlittable) && (settings.LogDevice as NullDevice == null) && ((SerializerSettings == null) || (SerializerSettings.keySerializer == null)))
             {
-                throw new FasterException("Key is not blittable, but no serializer specified via SerializerSettings");
+                Debug.WriteLine("Key is not blittable, but no serializer specified via SerializerSettings. Using (slow) DataContractSerializer as default.");
+                if (SerializerSettings == null)
+                    SerializerSettings = new SerializerSettings<Key, Value>();
+                SerializerSettings.keySerializer = ObjectSerializer.Get<Key>();
             }
 
             if ((!valueBlittable) && (settings.LogDevice as NullDevice == null) && ((SerializerSettings == null) || (SerializerSettings.valueSerializer == null)))
             {
-                throw new FasterException("Value is not blittable, but no serializer specified via SerializerSettings");
+                Debug.WriteLine("Value is not blittable, but no serializer specified via SerializerSettings. Using (slow) DataContractSerializer as default.");
+                if (SerializerSettings == null)
+                    SerializerSettings = new SerializerSettings<Key, Value>();
+                SerializerSettings.valueSerializer = ObjectSerializer.Get<Value>();
             }
 
             values = new Record<Key, Value>[BufferSize][];
@@ -235,7 +239,7 @@ namespace FASTER.core
             objectLogDevice.TruncateUntilAddress(toAddress);
         }
 
-        protected override void WriteAsync<TContext>(long flushPage, IOCompletionCallback callback,  PageAsyncFlushResult<TContext> asyncResult)
+        protected override void WriteAsync<TContext>(long flushPage, DeviceIOCompletionCallback callback,  PageAsyncFlushResult<TContext> asyncResult)
         {
             WriteAsync(flushPage,
                     (ulong)(AlignedPageSizeBytes * flushPage),
@@ -245,7 +249,7 @@ namespace FASTER.core
         }
 
         protected override void WriteAsyncToDevice<TContext>
-            (long startPage, long flushPage, int pageSize, IOCompletionCallback callback, 
+            (long startPage, long flushPage, int pageSize, DeviceIOCompletionCallback callback, 
             PageAsyncFlushResult<TContext> asyncResult, IDevice device, IDevice objectLogDevice, long[] localSegmentOffsets)
         {
             // We are writing to separate device, so use fresh segment offsets
@@ -273,7 +277,7 @@ namespace FASTER.core
         }
 
         private void WriteAsync<TContext>(long flushPage, ulong alignedDestinationAddress, uint numBytesToWrite,
-                        IOCompletionCallback callback, PageAsyncFlushResult<TContext> asyncResult,
+                        DeviceIOCompletionCallback callback, PageAsyncFlushResult<TContext> asyncResult,
                         IDevice device, IDevice objlogDevice, long intendedDestinationPage = -1, long[] localSegmentOffsets = null)
         {
             // Short circuit if we are using a null device
@@ -359,7 +363,7 @@ namespace FASTER.core
                     if (KeyHasObjects())
                     {
                         long pos = ms.Position;
-                        keySerializer.Serialize(ref src[i].key);
+                        keySerializer.Serialize(in src[i].key);
                         var key_address = GetKeyAddressInfo((long)(buffer.aligned_pointer + i * recordSize));
                         key_address->Address = pos;
                         key_address->Size = (int)(ms.Position - pos);
@@ -369,7 +373,7 @@ namespace FASTER.core
                     if (ValueHasObjects() && !src[i].info.Tombstone)
                     {
                         long pos = ms.Position;
-                        valueSerializer.Serialize(ref src[i].value);
+                        valueSerializer.Serialize(in src[i].value);
                         var value_address = GetValueAddressInfo((long)(buffer.aligned_pointer + i * recordSize));
                         value_address->Address = pos;
                         value_address->Size = (int)(ms.Position - pos);
@@ -451,24 +455,22 @@ namespace FASTER.core
                 alignedNumBytesToWrite, callback, asyncResult);
         }
 
-        private void AsyncReadPageCallback(uint errorCode, uint numBytes, NativeOverlapped* overlap)
+        private void AsyncReadPageCallback(uint errorCode, uint numBytes, object context)
         {
             if (errorCode != 0)
             {
-                Trace.TraceError("OverlappedStream GetQueuedCompletionStatus error: {0}", errorCode);
+                Trace.TraceError("AsyncReadPageCallback error: {0}", errorCode);
             }
 
             // Set the page status to flushed
-            var result = (PageAsyncReadResult<Empty>)Overlapped.Unpack(overlap).AsyncResult;
+            var result = (PageAsyncReadResult<Empty>)context;
 
             result.handle.Signal();
-
-            Overlapped.Free(overlap);
         }
 
         protected override void ReadAsync<TContext>(
             ulong alignedSourceAddress, int destinationPageIndex, uint aligned_read_length,
-            IOCompletionCallback callback, PageAsyncReadResult<TContext> asyncResult, IDevice device, IDevice objlogDevice)
+            DeviceIOCompletionCallback callback, PageAsyncReadResult<TContext> asyncResult, IDevice device, IDevice objlogDevice)
         {
             asyncResult.freeBuffer1 = bufferPool.Get((int)aligned_read_length);
             asyncResult.freeBuffer1.required_bytes = (int)aligned_read_length;
@@ -499,29 +501,27 @@ namespace FASTER.core
         /// </summary>
         /// <param name="errorCode"></param>
         /// <param name="numBytes"></param>
-        /// <param name="overlap"></param>
-        private void AsyncFlushPartialObjectLogCallback<TContext>(uint errorCode, uint numBytes, NativeOverlapped* overlap)
+        /// <param name="context"></param>
+        private void AsyncFlushPartialObjectLogCallback<TContext>(uint errorCode, uint numBytes, object context)
         {
             if (errorCode != 0)
             {
-               Trace.TraceError("OverlappedStream GetQueuedCompletionStatus error: {0}", errorCode);
+               Trace.TraceError("AsyncFlushPartialObjectLogCallback error: {0}", errorCode);
             }
 
             // Set the page status to flushed
-            PageAsyncFlushResult<TContext> result = (PageAsyncFlushResult<TContext>)Overlapped.Unpack(overlap).AsyncResult;
+            PageAsyncFlushResult<TContext> result = (PageAsyncFlushResult<TContext>)context;
             result.done.Set();
-
-            Overlapped.Free(overlap);
         }
 
-        private void AsyncReadPageWithObjectsCallback<TContext>(uint errorCode, uint numBytes, NativeOverlapped* overlap)
+        private void AsyncReadPageWithObjectsCallback<TContext>(uint errorCode, uint numBytes, object context)
         {
             if (errorCode != 0)
             {
-                Trace.TraceError("OverlappedStream GetQueuedCompletionStatus error: {0}", errorCode);
+                Trace.TraceError("AsyncReadPageWithObjectsCallback error: {0}", errorCode);
             }
 
-            PageAsyncReadResult<TContext> result = (PageAsyncReadResult<TContext>)Overlapped.Unpack(overlap).AsyncResult;
+            PageAsyncReadResult<TContext> result = (PageAsyncReadResult<TContext>)context;
 
             Record<Key, Value>[] src;
 
@@ -554,12 +554,9 @@ namespace FASTER.core
                 result.Free();
 
                 // Call the "real" page read callback
-                result.callback(errorCode, numBytes, overlap);
+                result.callback(errorCode, numBytes, context);
                 return;
             }
-
-            // We will be re-issuing I/O, so free current overlap
-            Overlapped.Free(overlap);
 
             // We will now be able to process all records until (but not including) untilPtr
             GetObjectInfo(result.freeBuffer1.GetValidPointer(), ref result.untilPtr, result.maxPtr, ObjectBlockSize, out long startptr, out long size);
@@ -590,7 +587,7 @@ namespace FASTER.core
         /// <param name="callback"></param>
         /// <param name="context"></param>
         /// <param name="result"></param>
-        protected override void AsyncReadRecordObjectsToMemory(long fromLogical, int numBytes, IOCompletionCallback callback, AsyncIOContext<Key, Value> context, SectorAlignedMemory result = default(SectorAlignedMemory))
+        protected override void AsyncReadRecordObjectsToMemory(long fromLogical, int numBytes, DeviceIOCompletionCallback callback, AsyncIOContext<Key, Value> context, SectorAlignedMemory result = default)
         {
             ulong fileOffset = (ulong)(AlignedPageSizeBytes * (fromLogical >> LogPageSizeBits) + (fromLogical & PageSizeMask));
             ulong alignedFileOffset = (ulong)(((long)fileOffset / sectorSize) * sectorSize);
@@ -634,7 +631,7 @@ namespace FASTER.core
                                         long readPageStart,
                                         int numPages,
                                         long untilAddress,
-                                        IOCompletionCallback callback,
+                                        DeviceIOCompletionCallback callback,
                                         TContext context,
                                         GenericFrame<Key, Value> frame,
                                         out CountdownEvent completed,
@@ -732,8 +729,7 @@ namespace FASTER.core
                             stream.Seek(streamStartPos + key_addr->Address - start_addr, SeekOrigin.Begin);
                         }
 
-                        src[ptr / recordSize].key = new Key();
-                        keySerializer.Deserialize(ref src[ptr/recordSize].key);
+                        keySerializer.Deserialize(out src[ptr/recordSize].key);
                     }
                     else
                     {
@@ -751,8 +747,7 @@ namespace FASTER.core
                                 stream.Seek(streamStartPos + value_addr->Address - start_addr, SeekOrigin.Begin);
                             }
 
-                            src[ptr / recordSize].value = new Value();
-                            valueSerializer.Deserialize(ref src[ptr / recordSize].value);
+                            valueSerializer.Deserialize(out src[ptr / recordSize].value);
                         }
                         else
                         {
@@ -893,21 +888,17 @@ namespace FASTER.core
 
             if (KeyHasObjects())
             {
-                ctx.key = new Key();
-
                 var keySerializer = SerializerSettings.keySerializer();
                 keySerializer.BeginDeserialize(ms);
-                keySerializer.Deserialize(ref ctx.key);
+                keySerializer.Deserialize(out ctx.key);
                 keySerializer.EndDeserialize();
             }
 
             if (ValueHasObjects() && !GetInfoFromBytePointer(record).Tombstone)
             {
-                ctx.value = new Value();
-
                 var valueSerializer = SerializerSettings.valueSerializer();
                 valueSerializer.BeginDeserialize(ms);
-                valueSerializer.Deserialize(ref ctx.value);
+                valueSerializer.Deserialize(out ctx.value);
                 valueSerializer.EndDeserialize();
             }
 

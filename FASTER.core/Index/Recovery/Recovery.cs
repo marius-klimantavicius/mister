@@ -5,6 +5,7 @@
 
 using System;
 using System.Diagnostics;
+using System.Resources;
 using System.Threading;
 
 namespace FASTER.core
@@ -46,14 +47,67 @@ namespace FASTER.core
 
 
     public unsafe partial class FasterKV<Key, Value> : FasterBase, IFasterKV<Key, Value>
-        where Key : new()
-        where Value : new()
     {
 
         private void InternalRecoverFromLatestCheckpoints()
         {
-            checkpointManager.GetLatestCheckpoint(out Guid indexCheckpointGuid, out Guid hybridLogCheckpointGuid);
-            InternalRecover(indexCheckpointGuid, hybridLogCheckpointGuid);
+            Debug.WriteLine("********* Primary Recovery Information ********");
+
+            HybridLogCheckpointInfo recoveredHLCInfo = default;
+
+            foreach (var hybridLogToken in checkpointManager.GetLogCheckpointTokens())
+            {
+                try
+                {
+                    recoveredHLCInfo = new HybridLogCheckpointInfo();
+                    recoveredHLCInfo.Recover(hybridLogToken, checkpointManager);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                Debug.WriteLine("HybridLog Checkpoint: {0}", hybridLogToken);
+                break;
+            }
+
+            if (recoveredHLCInfo.IsDefault())
+                throw new FasterException("Unable to find valid index token");
+
+            recoveredHLCInfo.info.DebugPrint();
+
+            IndexCheckpointInfo recoveredICInfo = default;
+
+            foreach (var indexToken in checkpointManager.GetIndexCheckpointTokens())
+            {
+                try
+                {
+                    // Recovery appropriate context information
+                    recoveredICInfo = new IndexCheckpointInfo();
+                    recoveredICInfo.Recover(indexToken, checkpointManager);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (!IsCompatible(recoveredICInfo.info, recoveredHLCInfo.info))
+                {
+                    recoveredICInfo = default;
+                    continue;
+                }
+
+                Debug.WriteLine("Index Checkpoint: {0}", indexToken);
+                break;
+            }
+
+            if (recoveredICInfo.IsDefault())
+                throw new FasterException("Unable to find valid index token");
+
+            recoveredICInfo.info.DebugPrint();
+
+
+            InternalRecover(recoveredICInfo, recoveredHLCInfo);
         }
 
         private bool IsCompatible(in IndexRecoveryInfo indexInfo, in HybridLogRecoveryInfo recoveryInfo)
@@ -69,8 +123,6 @@ namespace FASTER.core
             Debug.WriteLine("Index Checkpoint: {0}", indexToken);
             Debug.WriteLine("HybridLog Checkpoint: {0}", hybridLogToken);
 
-            // Ensure active state machine to null
-            currentSyncStateMachine = null;
 
             // Recovery appropriate context information
             var recoveredICInfo = new IndexCheckpointInfo();
@@ -86,6 +138,14 @@ namespace FASTER.core
             {
                 throw new FasterException("Cannot recover from (" + indexToken.ToString() + "," + hybridLogToken.ToString() + ") checkpoint pair!\n");
             }
+
+            InternalRecover(recoveredICInfo, recoveredHLCInfo);
+        }
+
+        private void InternalRecover(IndexCheckpointInfo recoveredICInfo, HybridLogCheckpointInfo recoveredHLCInfo)
+        {
+            // Ensure active state machine to null
+            currentSyncStateMachine = null;
 
             // Set new system state after recovery
             var v = recoveredHLCInfo.info.version;
@@ -103,7 +163,7 @@ namespace FASTER.core
 
 
             // Make index consistent for version v
-            if (FoldOverSnapshot)
+            if (recoveredHLCInfo.info.useSnapshotFile == 0)
             {
                 RecoverHybridLog(recoveredICInfo.info, recoveredHLCInfo.info);
             }
@@ -370,15 +430,15 @@ namespace FASTER.core
         }
 
 
-        private void AsyncFlushPageCallbackForRecovery(uint errorCode, uint numBytes, NativeOverlapped* overlap)
+        private void AsyncFlushPageCallbackForRecovery(uint errorCode, uint numBytes, object context)
         {
             if (errorCode != 0)
             {
-                Trace.TraceError("OverlappedStream GetQueuedCompletionStatus error: {0}", errorCode);
+                Trace.TraceError("AsyncFlushPageCallbackForRecovery error: {0}", errorCode);
             }
 
             // Set the page status to flushed
-            var result = (PageAsyncFlushResult<RecoveryStatus>)Overlapped.Unpack(overlap).AsyncResult;
+            var result = (PageAsyncFlushResult<RecoveryStatus>)context;
 
             if (Interlocked.Decrement(ref result.count) == 0)
             {
@@ -401,13 +461,10 @@ namespace FASTER.core
                 }
                 result.Free();
             }
-            Overlapped.Free(overlap);
         }
     }
 
     public unsafe abstract partial class AllocatorBase<Key, Value> : IDisposable
-        where Key : new()
-        where Value : new()
     {
         /// <summary>
         /// Restore log
@@ -469,15 +526,15 @@ namespace FASTER.core
             RecoveryReset(untilAddress, headAddress, beginAddress);
         }
 
-        internal void AsyncReadPagesCallbackForRecovery(uint errorCode, uint numBytes, NativeOverlapped* overlap)
+        internal void AsyncReadPagesCallbackForRecovery(uint errorCode, uint numBytes, object context)
         {
             if (errorCode != 0)
             {
-                Trace.TraceError("OverlappedStream GetQueuedCompletionStatus error: {0}", errorCode);
+                Trace.TraceError("AsyncReadPagesCallbackForRecovery error: {0}", errorCode);
             }
 
             // Set the page status to flushed
-            var result = (PageAsyncReadResult<RecoveryStatus>)Overlapped.Unpack(overlap).AsyncResult;
+            var result = (PageAsyncReadResult<RecoveryStatus>)context;
 
             if (result.freeBuffer1 != null)
             {
@@ -487,7 +544,6 @@ namespace FASTER.core
             int index = GetPageIndexForPage(result.page);
             result.context.readStatus[index] = ReadStatus.Done;
             Interlocked.MemoryBarrier();
-            Overlapped.Free(overlap);
         }
     }
 }

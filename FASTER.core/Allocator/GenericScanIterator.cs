@@ -3,6 +3,7 @@
 
 using System.Threading;
 using System.Diagnostics;
+using System;
 
 namespace FASTER.core
 {
@@ -10,8 +11,6 @@ namespace FASTER.core
     /// Scan iterator for hybrid log
     /// </summary>
     public sealed class GenericScanIterator<Key, Value> : IFasterScanIterator<Key, Value>
-        where Key : new()
-        where Value : new()
     {
         private readonly int frameSize;
         private readonly GenericAllocator<Key, Value> hlog;
@@ -225,14 +224,14 @@ namespace FASTER.core
             frame?.Dispose();
         }
 
-        private unsafe void AsyncReadPagesCallback(uint errorCode, uint numBytes, NativeOverlapped* overlap)
+        private unsafe void AsyncReadPagesCallback(uint errorCode, uint numBytes, object context)
         {
             if (errorCode != 0)
             {
-                Trace.TraceError("OverlappedStream GetQueuedCompletionStatus error: {0}", errorCode);
+                Trace.TraceError("AsyncReadPagesCallback error: {0}", errorCode);
             }
 
-            var result = (PageAsyncReadResult<Empty>)Overlapped.Unpack(overlap).AsyncResult;
+            var result = (PageAsyncReadResult<Empty>)context;
 
             if (result.freeBuffer1 != null)
             {
@@ -246,7 +245,6 @@ namespace FASTER.core
             }
 
             Interlocked.MemoryBarrier();
-            Overlapped.Free(overlap);
         }
     }
 }

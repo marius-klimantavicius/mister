@@ -1,12 +1,13 @@
 ﻿// Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT license.
 
+using System.Collections.Generic;
 using System.IO;
 
 namespace FASTER.core
 {
     /// <summary>
-    /// Implementation of checkpoint interface for local file storage
+    /// Older implementation of checkpoint interface for local file storage (left for backward compatibility)
     /// </summary>
     public sealed class LocalLogCommitManager : ILogCommitManager
     {
@@ -46,10 +47,17 @@ namespace FASTER.core
         }
 
         /// <summary>
+        /// Dispose
+        /// </summary>
+        public void Dispose()
+        {
+        }
+
+        /// <summary>
         /// Retrieve commit metadata
         /// </summary>
         /// <returns>Metadata, or null if invalid</returns>
-        public byte[] GetCommitMetadata()
+        public byte[] GetCommitMetadata(long commitNum)
         {
             if (!File.Exists(commitFile))
                 return null;
@@ -59,6 +67,16 @@ namespace FASTER.core
                 var len = reader.ReadInt32();
                 return reader.ReadBytes(len);
             }
+        }
+
+        /// <summary>
+        /// List of commit numbers
+        /// </summary>
+        /// <returns></returns>
+        public IEnumerable<long> ListCommits()
+        {
+            // we only use a single commit file in this implementation
+            yield return 0;
         }
     }
 }

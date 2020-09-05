@@ -14,8 +14,6 @@ namespace FASTER.core
     /// <typeparam name="Key"></typeparam>
     /// <typeparam name="Value"></typeparam>
     public sealed class LogAccessor<Key, Value> : IObservable<IFasterScanIterator<Key, Value>>
-        where Key : new()
-        where Value : new()
     {
         private readonly FasterKV<Key, Value> fht;
         private readonly AllocatorBase<Key, Value> allocator;
@@ -74,13 +72,22 @@ namespace FASTER.core
         public bool ShiftHeadAddress(long newHeadAddress, bool wait)
         {
             // First shift read-only
-            ShiftReadOnlyAddress(newHeadAddress, wait);
+            // Force wait so that we do not close unflushed page
+            ShiftReadOnlyAddress(newHeadAddress, true);
 
             // Then shift head address
-            fht.epoch.Resume();
-            var updatedHeadAddress = allocator.ShiftHeadAddress(newHeadAddress);
-            fht.epoch.Suspend();
-            return updatedHeadAddress >= newHeadAddress;
+            if (!fht.epoch.ThisInstanceProtected())
+            {
+                fht.epoch.Resume();
+                var updatedHeadAddress = allocator.ShiftHeadAddress(newHeadAddress);
+                fht.epoch.Suspend();
+                return updatedHeadAddress >= newHeadAddress;
+            }
+            else
+            {
+                var updatedHeadAddress = allocator.ShiftHeadAddress(newHeadAddress);
+                return updatedHeadAddress >= newHeadAddress;
+            }
         }
 
         /// <summary>
@@ -121,12 +128,23 @@ namespace FASTER.core
         /// <param name="wait">Wait to ensure shift is complete (may involve page flushing)</param>
         public void ShiftReadOnlyAddress(long newReadOnlyAddress, bool wait)
         {
-            fht.epoch.Resume();
-            allocator.ShiftReadOnlyAddress(newReadOnlyAddress);
-            fht.epoch.Suspend();
+            if (!fht.epoch.ThisInstanceProtected())
+            {
+                fht.epoch.Resume();
+                allocator.ShiftReadOnlyAddress(newReadOnlyAddress);
+                fht.epoch.Suspend();
 
-            // Wait for flush to complete
-            while (wait && allocator.FlushedUntilAddress < newReadOnlyAddress) ;
+                // Wait for flush to complete
+                while (wait && allocator.FlushedUntilAddress < newReadOnlyAddress) ;
+            }
+            else
+            {
+                allocator.ShiftReadOnlyAddress(newReadOnlyAddress);
+
+                // Wait for flush to complete
+                while (wait && allocator.FlushedUntilAddress < newReadOnlyAddress)
+                    fht.epoch.ProtectAndDrain();
+            }
         }
 
         /// <summary>
