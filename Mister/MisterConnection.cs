@@ -190,7 +190,7 @@ namespace Marius.Mister
 
             if (_mainDevice != null)
                 _mainDevice.Dispose();
-            
+
             var variableLengthStructSettings = new VariableLengthStructSettings<MisterObject, MisterObject>()
             {
                 keyLength = MisterObjectVariableLengthStruct.Instance,
@@ -219,12 +219,14 @@ namespace Marius.Mister
         where TFunctions : IFunctions<TKeyAtom, TValueAtom, byte[], TValue, object>
         where TFaster : IFasterKV<TKeyAtom, TValueAtom>
     {
-        private sealed class MisterSession : IMisterSession<TKey, TValue>
+        protected sealed class MisterSession : IMisterSession<TKey, TValue>
         {
             private readonly MisterConnection<TKey, TValue, TKeyAtom, TKeyAtomSource, TValueAtom, TValueAtomSource, TFunctions, TFaster> _connection;
             private readonly ClientSession<TKeyAtom, TValueAtom, byte[], TValue, object, TFunctions> _session;
             private readonly CancellationToken _cancellationToken;
             private bool _isDisposed;
+
+            public ClientSession<TKeyAtom, TValueAtom, byte[], TValue, object, TFunctions> Session => _session;
 
             public MisterSession Prev;
             public MisterSession Next;
@@ -392,9 +394,13 @@ namespace Marius.Mister
             return _maintenanceService.CheckpointAsync();
         }
 
-        public void Flush(bool waitPending)
+        public void Flush(bool waitPending, bool evict = false)
         {
-            _faster.Log.FlushAndEvict(waitPending);
+            if (evict)
+                _faster.Log.FlushAndEvict(waitPending);
+            else
+                _faster.Log.Flush(waitPending);
+
             _maintenanceService.IncrementVersion();
         }
 
@@ -491,7 +497,7 @@ namespace Marius.Mister
                 throw new ObjectDisposedException("MisterConnection");
         }
 
-        private MisterSession GetOrCreateSession(string sessionId = null)
+        protected MisterSession GetOrCreateSession(string sessionId = null)
         {
             CheckDisposed();
 
@@ -518,7 +524,7 @@ namespace Marius.Mister
             }
         }
 
-        private void ReturnOrDisposeSession(MisterSession session)
+        protected void ReturnOrDisposeSession(MisterSession session)
         {
             if (_sessionPool.Count < _sessionPoolSize)
                 _sessionPool.Add(session);
