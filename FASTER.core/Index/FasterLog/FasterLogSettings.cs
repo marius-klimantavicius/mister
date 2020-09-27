@@ -77,6 +77,16 @@ namespace FASTER.core
         /// </summary>
         public LogChecksumType LogChecksum = LogChecksumType.None;
 
+        /// <summary>
+        /// Fraction of log marked as mutable (uncommitted)
+        /// </summary>
+        public double MutableFraction = 0;
+
+        /// <summary>
+        /// Use FasterLog as read-only iterator/viewer of log being committed by another instance
+        /// </summary>
+        public bool ReadOnlyMode = false;
+
         internal LogSettings GetLogSettings()
         {
             return new LogSettings
@@ -84,9 +94,9 @@ namespace FASTER.core
                 LogDevice = LogDevice,
                 PageSizeBits = PageSizeBits,
                 SegmentSizeBits = SegmentSizeBits,
-                MemorySizeBits = MemorySizeBits,
+                MemorySizeBits = ReadOnlyMode ? 0 : MemorySizeBits,
                 CopyReadsToTail = false,
-                MutableFraction = 0,
+                MutableFraction = MutableFraction,
                 ObjectLogDevice = null,
                 ReadCacheSettings = null
             };

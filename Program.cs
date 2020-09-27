@@ -152,6 +152,53 @@ namespace Marius.Mister
                             await connection.SetAsync($"{prefix}{i}", $"{prefix}{i}");
                     }
                 }
+                else if (parts[0] == "getn" && parts.Length > 1)
+                {
+                    if (!int.TryParse(parts[1], out var count))
+                        continue;
+
+                    var prefix = "";
+                    if (parts.Length > 2)
+                        prefix = parts[2];
+
+                    using (new DurationLogger(sw))
+                    {
+                        var tasks = new Task[Environment.ProcessorCount * 20];
+                        var rem = 0;
+                        for (var i = 0; i < tasks.Length; i++)
+                        {
+                            tasks[i] = Task.Run(async () =>
+                            {
+                                await Task.Yield();
+
+                                var c = 0;
+                                do
+                                {
+                                    c = Interlocked.Increment(ref rem);
+                                    await connection.GetAsync($"{prefix}{c}");
+                                }
+                                while (c < count);
+                            });
+                        }
+
+                        await Task.WhenAll(tasks);
+                    }
+                }
+                else if (parts[0] == "getns" && parts.Length > 1)
+                {
+                    if (!int.TryParse(parts[1], out var count))
+                        continue;
+
+                    var prefix = "";
+                    if (parts.Length > 2)
+                        prefix = parts[2];
+
+                    using (new DurationLogger(sw))
+                    {
+                        for (var i = 0; i < count; i++)
+                            await connection.GetAsync($"{prefix}{i}");
+                    }
+                }
             }
             connection.Close();
 

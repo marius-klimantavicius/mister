@@ -6,12 +6,7 @@ namespace Marius.Mister
     {
         public static MisterObjectVariableLengthStruct Instance = new MisterObjectVariableLengthStruct();
 
-        public int GetAverageLength()
-        {
-            return 4 * sizeof(int);
-        }
-
-        public int GetInitialLength<Input>(ref Input input)
+        public int GetInitialLength()
         {
             return 2 * sizeof(int);
         }

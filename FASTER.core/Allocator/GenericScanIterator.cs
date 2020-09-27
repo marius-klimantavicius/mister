@@ -3,6 +3,7 @@
 
 using System.Threading;
 using System.Diagnostics;
+using System;
 
 namespace FASTER.core
 {
@@ -10,12 +11,10 @@ namespace FASTER.core
     /// Scan iterator for hybrid log
     /// </summary>
     public sealed class GenericScanIterator<Key, Value> : IFasterScanIterator<Key, Value>
-        where Key : new()
-        where Value : new()
     {
         private readonly int frameSize;
         private readonly GenericAllocator<Key, Value> hlog;
-        private readonly long beginAddress, endAddress;
+        private readonly long endAddress;
         private readonly GenericFrame<Key, Value> frame;
         private readonly CountdownEvent[] loaded;
         private readonly int recordSize;
@@ -44,7 +43,6 @@ namespace FASTER.core
             if (beginAddress == 0)
                 beginAddress = hlog.GetFirstValidLogicalAddress(0);
 
-            this.beginAddress = beginAddress;
             this.endAddress = endAddress;
 
             recordSize = hlog.GetRecordSize(0);
@@ -100,13 +98,14 @@ namespace FASTER.core
         /// <returns></returns>
         public bool GetNext(out RecordInfo recordInfo)
         {
-            recordInfo = default(RecordInfo);
-            currentKey = default(Key);
-            currentValue = default(Value);
+            recordInfo = default;
+            currentKey = default;
+            currentValue = default;
 
-            currentAddress = nextAddress;
             while (true)
             {
+                currentAddress = nextAddress;
+
                 // Check for boundary conditions
                 if (currentAddress >= endAddress)
                 {
@@ -133,15 +132,15 @@ namespace FASTER.core
                 // Check if record fits on page, if not skip to next page
                 if ((currentAddress & hlog.PageSizeMask) + recordSize > hlog.PageSize)
                 {
-                    currentAddress = (1 + (currentAddress >> hlog.LogPageSizeBits)) << hlog.LogPageSizeBits;
+                    nextAddress = (1 + (currentAddress >> hlog.LogPageSizeBits)) << hlog.LogPageSizeBits;
                     continue;
                 }
+
+                nextAddress = currentAddress + recordSize;
 
                 if (currentAddress >= hlog.HeadAddress)
                 {
                     // Read record from cached page memory
-                    nextAddress = currentAddress + recordSize;
-
                     var page = currentPage % hlog.BufferSize;
 
                     if (hlog.values[page][offset].info.Invalid)
@@ -152,8 +151,6 @@ namespace FASTER.core
                     currentValue = hlog.values[page][offset].value;
                     return true;
                 }
-
-                nextAddress = currentAddress + recordSize;
 
                 var currentFrame = currentPage % frameSize;
 
@@ -227,14 +224,14 @@ namespace FASTER.core
             frame?.Dispose();
         }
 
-        private unsafe void AsyncReadPagesCallback(uint errorCode, uint numBytes, NativeOverlapped* overlap)
+        private unsafe void AsyncReadPagesCallback(uint errorCode, uint numBytes, object context)
         {
             if (errorCode != 0)
             {
-                Trace.TraceError("OverlappedStream GetQueuedCompletionStatus error: {0}", errorCode);
+                Trace.TraceError("AsyncReadPagesCallback error: {0}", errorCode);
             }
 
-            var result = (PageAsyncReadResult<Empty>)Overlapped.Unpack(overlap).AsyncResult;
+            var result = (PageAsyncReadResult<Empty>)context;
 
             if (result.freeBuffer1 != null)
             {
@@ -248,7 +245,6 @@ namespace FASTER.core
             }
 
             Interlocked.MemoryBarrier();
-            Overlapped.Free(overlap);
         }
     }
 }

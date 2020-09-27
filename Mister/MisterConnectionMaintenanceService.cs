@@ -10,10 +10,8 @@ using FASTER.core;
 namespace Marius.Mister
 {
     public class MisterConnectionMaintenanceService<TValue, TKeyAtom, TValueAtom, TFunctions, TFaster>
-        where TKeyAtom : new()
-        where TValueAtom : new()
         where TFunctions : IFunctions<TKeyAtom, TValueAtom, byte[], TValue, object>
-        where TFaster : IFasterKV<TKeyAtom, TValueAtom, byte[], TValue, object, TFunctions>
+        where TFaster : IFasterKV<TKeyAtom, TValueAtom>
     {
         private struct MisterMaintenanceItem
         {
@@ -218,7 +216,7 @@ namespace Marius.Mister
         {
             try
             {
-                _faster.Log.Compact(_faster.Log.SafeReadOnlyAddress);
+                _faster.Log.Compact(_faster.Log.SafeReadOnlyAddress, true);
                 IncrementVersion();
             }
             catch

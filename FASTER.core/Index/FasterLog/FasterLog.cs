@@ -8,6 +8,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -22,11 +23,16 @@ namespace FASTER.core
         private readonly BlittableAllocator<Empty, byte> allocator;
         private readonly LightEpoch epoch;
         private readonly ILogCommitManager logCommitManager;
+        private readonly bool disposeLogCommitManager;
         private readonly GetMemory getMemory;
         private readonly int headerSize;
         private readonly LogChecksumType logChecksum;
+        internal readonly bool readOnlyMode;
+
         private TaskCompletionSource<LinkedCommitInfo> commitTcs
             = new TaskCompletionSource<LinkedCommitInfo>(TaskCreationOptions.RunContinuationsAsynchronously);
+        private TaskCompletionSource<Empty> refreshUncommittedTcs
+            = new TaskCompletionSource<Empty>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         /// <summary>
         /// Beginning address of log
@@ -42,6 +48,11 @@ namespace FASTER.core
         /// Log flushed until address
         /// </summary>
         public long FlushedUntilAddress => allocator.FlushedUntilAddress;
+
+        /// <summary>
+        /// Log safe read-only address
+        /// </summary>
+        internal long SafeTailAddress;
 
         /// <summary>
         /// Dictionary of recovered iterators and their committed until addresses
@@ -64,9 +75,14 @@ namespace FASTER.core
         internal Task<LinkedCommitInfo> CommitTask => commitTcs.Task;
 
         /// <summary>
+        /// Task notifying refresh uncommitted
+        /// </summary>
+        internal Task<Empty> RefreshUncommittedTask => refreshUncommittedTcs.Task;
+
+        /// <summary>
         /// Table of persisted iterators
         /// </summary>
-        internal readonly ConcurrentDictionary<string, FasterLogScanIterator> PersistedIterators 
+        internal readonly ConcurrentDictionary<string, FasterLogScanIterator> PersistedIterators
             = new ConcurrentDictionary<string, FasterLogScanIterator>();
 
         /// <summary>
@@ -81,9 +97,25 @@ namespace FASTER.core
         /// <param name="logSettings"></param>
         public FasterLog(FasterLogSettings logSettings)
         {
-            logCommitManager = logSettings.LogCommitManager ??
-                new LocalLogCommitManager(logSettings.LogCommitFile ??
-                logSettings.LogDevice.FileName + ".commit");
+            bool oldCommitManager = false;
+
+            if (oldCommitManager)
+            {
+                logCommitManager = logSettings.LogCommitManager ??
+                    new LocalLogCommitManager(logSettings.LogCommitFile ??
+                    logSettings.LogDevice.FileName + ".commit");
+            }
+            else
+            {
+                logCommitManager = logSettings.LogCommitManager ??
+                    new DeviceLogCommitCheckpointManager
+                    (new LocalStorageNamedDeviceFactory(),
+                        new DefaultCheckpointNamingScheme(
+                          new FileInfo(logSettings.LogDevice.FileName).Directory.FullName));
+            }
+
+            if (logSettings.LogCommitManager == null)
+                disposeLogCommitManager = true;
 
             // Reserve 8 byte checksum in header if requested
             logChecksum = logSettings.LogChecksum;
@@ -92,11 +124,20 @@ namespace FASTER.core
             epoch = new LightEpoch();
             CommittedUntilAddress = Constants.kFirstValidAddress;
             CommittedBeginAddress = Constants.kFirstValidAddress;
+            SafeTailAddress = Constants.kFirstValidAddress;
 
             allocator = new BlittableAllocator<Empty, byte>(
                 logSettings.GetLogSettings(), null,
                 null, epoch, CommitCallback);
             allocator.Initialize();
+
+            // FasterLog is used as a read-only iterator
+            if (logSettings.ReadOnlyMode)
+            {
+                readOnlyMode = true;
+                allocator.HeadAddress = long.MaxValue;
+            }
+
             Restore(out RecoveredIterators);
         }
 
@@ -114,6 +155,8 @@ namespace FASTER.core
             commitTcs.TrySetException(new ObjectDisposedException("Log has been disposed"));
             allocator.Dispose();
             epoch.Dispose();
+            if (disposeLogCommitManager)
+                logCommitManager.Dispose();
         }
 
         #region Enqueue
@@ -240,10 +283,10 @@ namespace FASTER.core
             if (TryEnqueue(entry, out long logicalAddress))
                 return new ValueTask<long>(logicalAddress);
 
-            return SlowEnqueueAsync1(this, entry, token);
+            return SlowEnqueueAsync(this, entry, token);
         }
 
-        private static async ValueTask<long> SlowEnqueueAsync1(FasterLog @this, byte[] entry, CancellationToken token)
+        private static async ValueTask<long> SlowEnqueueAsync(FasterLog @this, byte[] entry, CancellationToken token)
         {
             long logicalAddress;
             while (true)
@@ -444,6 +487,34 @@ namespace FASTER.core
             }
 
             return prevCommitTask;
+        }
+
+        /// <summary>
+        /// Trigger a refresh of information about uncommitted part of log (tail address) to ensure visibility 
+        /// to uncommitted scan iterators. Will cause SafeTailAddress to reflect the current tail address.
+        /// </summary>
+        public void RefreshUncommitted(bool spinWait = false)
+        {
+            RefreshUncommittedInternal(spinWait);
+        }
+
+        /// <summary>
+        /// Trigger a refresh of information about uncommitted part of log (tail address) to ensure visibility 
+        /// to uncommitted scan iterators. Will cause SafeTailAddress to reflect the current tail address.
+        /// Async method completes only when we complete the refresh.
+        /// </summary>
+        /// <returns></returns>
+        public async ValueTask RefreshUncommittedAsync(CancellationToken token = default)
+        {
+            token.ThrowIfCancellationRequested();
+            var task = RefreshUncommittedTask;
+            var tailAddress = RefreshUncommittedInternal();
+
+            while (SafeTailAddress < tailAddress)
+            {
+                await task.WithCancellationAsync(token);
+                task = RefreshUncommittedTask;
+            }
         }
 
         #endregion
@@ -689,14 +760,25 @@ namespace FASTER.core
         /// <param name="name">Name of iterator, if we need to persist/recover it (default null - do not persist).</param>
         /// <param name="recover">Whether to recover named iterator from latest commit (if exists). If false, iterator starts from beginAddress.</param>
         /// <param name="scanBufferingMode">Use single or double buffering</param>
+        /// <param name="scanUncommitted">Whether we scan uncommitted data</param>
         /// <returns></returns>
-        public FasterLogScanIterator Scan(long beginAddress, long endAddress, string name = null, bool recover = true, ScanBufferingMode scanBufferingMode = ScanBufferingMode.DoublePageBuffering)
+        public FasterLogScanIterator Scan(long beginAddress, long endAddress, string name = null, bool recover = true, ScanBufferingMode scanBufferingMode = ScanBufferingMode.DoublePageBuffering, bool scanUncommitted = false)
         {
+            if (readOnlyMode)
+            {
+                scanBufferingMode = ScanBufferingMode.SinglePageBuffering;
+
+                if (name != null)
+                    throw new FasterException("Cannot used named iterators with read-only FasterLog");
+                if (scanUncommitted)
+                    throw new FasterException("Cannot used scanUncommitted with read-only FasterLog");
+            }
+
             FasterLogScanIterator iter;
             if (recover && name != null && RecoveredIterators != null && RecoveredIterators.ContainsKey(name))
-                iter = new FasterLogScanIterator(this, allocator, RecoveredIterators[name], endAddress, getMemory, scanBufferingMode, epoch, headerSize, name);
+                iter = new FasterLogScanIterator(this, allocator, RecoveredIterators[name], endAddress, getMemory, scanBufferingMode, epoch, headerSize, name, scanUncommitted);
             else
-                iter = new FasterLogScanIterator(this, allocator, beginAddress, endAddress, getMemory, scanBufferingMode, epoch, headerSize, name);
+                iter = new FasterLogScanIterator(this, allocator, beginAddress, endAddress, getMemory, scanBufferingMode, epoch, headerSize, name, scanUncommitted);
 
             if (name != null)
             {
@@ -777,7 +859,7 @@ namespace FASTER.core
                 logCommitManager.Commit(info.BeginAddress, info.FlushedUntilAddress, info.ToByteArray());
                 CommittedBeginAddress = info.BeginAddress;
                 CommittedUntilAddress = info.FlushedUntilAddress;
-                
+
                 // Update completed address for persisted iterators
                 info.CommitIterators(PersistedIterators);
 
@@ -802,32 +884,100 @@ namespace FASTER.core
         }
 
         /// <summary>
+        /// Read-only callback
+        /// </summary>
+        private void UpdateTailCallback(long tailAddress)
+        {
+            lock (this)
+            {
+                if (tailAddress > SafeTailAddress)
+                {
+                    SafeTailAddress = tailAddress;
+
+                    var _refreshUncommittedTcs = refreshUncommittedTcs;
+                    refreshUncommittedTcs = new TaskCompletionSource<Empty>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    _refreshUncommittedTcs.SetResult(Empty.Default);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Recover instance to FasterLog's latest commit, when being used as a readonly log iterator
+        /// </summary>
+        public void RecoverReadOnly()
+        {
+            if (!readOnlyMode)
+                throw new FasterException("This method can only be used with a read-only FasterLog instance used for iteration. Set FasterLogSettings.ReadOnlyMode to true during creation to indicate this.");
+
+            Restore(out _);
+
+            var _commitTcs = commitTcs;
+            if (commitTcs.Task.Status != TaskStatus.Faulted || commitTcs.Task.Exception.InnerException as CommitFailureException != null)
+            {
+                commitTcs = new TaskCompletionSource<LinkedCommitInfo>(TaskCreationOptions.RunContinuationsAsynchronously);
+            }
+
+            // Update commit to release pending iterators
+            var lci = new LinkedCommitInfo
+            {
+                CommitInfo = new CommitInfo { BeginAddress = BeginAddress, FromAddress = BeginAddress, UntilAddress = FlushedUntilAddress },
+                NextTask = commitTcs.Task
+            };
+            _commitTcs?.TrySetResult(lci);
+        }
+
+        /// <summary>
         /// Restore log
         /// </summary>
         private void Restore(out Dictionary<string, long> recoveredIterators)
         {
+
             recoveredIterators = null;
-            FasterLogRecoveryInfo info = new FasterLogRecoveryInfo();
-            var commitInfo = logCommitManager.GetCommitMetadata();
 
-            if (commitInfo == null) return;
-
-            using (var r = new BinaryReader(new MemoryStream(commitInfo)))
+            foreach (var commitNum in logCommitManager.ListCommits())
             {
-                info.Initialize(r);
+                try
+                {
+                    var commitInfo = logCommitManager.GetCommitMetadata(commitNum);
+
+                    FasterLogRecoveryInfo info = new FasterLogRecoveryInfo();
+
+                    if (commitInfo == null) return;
+
+                    using (var r = new BinaryReader(new MemoryStream(commitInfo)))
+                    {
+                        info.Initialize(r);
+                    }
+
+                    recoveredIterators = info.Iterators;
+
+                    if (!readOnlyMode)
+                    {
+                        var headAddress = info.FlushedUntilAddress - allocator.GetOffsetInPage(info.FlushedUntilAddress);
+                        if (info.BeginAddress > headAddress)
+                            headAddress = info.BeginAddress;
+
+                        if (headAddress == 0) headAddress = Constants.kFirstValidAddress;
+
+                        allocator.RestoreHybridLog(info.BeginAddress, headAddress, info.FlushedUntilAddress, info.FlushedUntilAddress);
+                    }
+                    CommittedUntilAddress = info.FlushedUntilAddress;
+                    CommittedBeginAddress = info.BeginAddress;
+                    SafeTailAddress = info.FlushedUntilAddress;
+
+                    // Fix uncommitted addresses in iterators
+                    if (recoveredIterators != null)
+                    {
+                        List<string> keys = recoveredIterators.Keys.ToList();
+                        foreach (var key in keys)
+                            if (recoveredIterators[key] > SafeTailAddress)
+                                recoveredIterators[key] = SafeTailAddress;
+                    }
+                    return;
+                }
+                catch { }
             }
-
-            var headAddress = info.FlushedUntilAddress - allocator.GetOffsetInPage(info.FlushedUntilAddress);
-            if (info.BeginAddress > headAddress)
-                headAddress = info.BeginAddress;
-
-            if (headAddress == 0) headAddress = Constants.kFirstValidAddress;
-
-            recoveredIterators = info.Iterators;
-
-            allocator.RestoreHybridLog(info.FlushedUntilAddress, headAddress, info.BeginAddress);
-            CommittedUntilAddress = info.FlushedUntilAddress;
-            CommittedBeginAddress = info.BeginAddress;
+            Debug.WriteLine("Unable to recover using any available commit");
         }
 
         /// <summary>
@@ -873,13 +1023,13 @@ namespace FASTER.core
             return true;
         }
 
-        private unsafe void AsyncGetFromDiskCallback(uint errorCode, uint numBytes, NativeOverlapped* overlap)
+        private unsafe void AsyncGetFromDiskCallback(uint errorCode, uint numBytes, object context)
         {
-            var ctx = (SimpleReadContext)Overlapped.Unpack(overlap).AsyncResult;
+            var ctx = (SimpleReadContext)context;
 
             if (errorCode != 0)
             {
-                Trace.TraceError("OverlappedStream GetQueuedCompletionStatus error: {0}", errorCode);
+                Trace.TraceError("AsyncGetFromDiskCallback error: {0}", errorCode);
                 ctx.record.Return();
                 ctx.record = null;
                 ctx.completedRead.Release();
@@ -910,7 +1060,6 @@ namespace FASTER.core
                     }
                 }
             }
-            Overlapped.Free(overlap);
         }
 
         private (byte[], int) GetRecordAndFree(SectorAlignedMemory record)
@@ -940,6 +1089,9 @@ namespace FASTER.core
 
         private long CommitInternal(bool spinWait = false)
         {
+            if (readOnlyMode)
+                throw new FasterException("Cannot commit in read-only mode");
+
             epoch.Resume();
             if (allocator.ShiftReadOnlyToTail(out long tailAddress, out _))
             {
@@ -962,13 +1114,31 @@ namespace FASTER.core
                     CommitCallback(new CommitInfo
                     {
                         BeginAddress = beginAddress,
-                        FromAddress = CommittedUntilAddress,
-                        UntilAddress = CommittedUntilAddress,
+                        FromAddress = CommittedUntilAddress > beginAddress ? CommittedUntilAddress : beginAddress,
+                        UntilAddress = CommittedUntilAddress > beginAddress ? CommittedUntilAddress : beginAddress,
                         ErrorCode = 0
                     });
             }
 
             return tailAddress;
+        }
+
+        private long RefreshUncommittedInternal(bool spinWait = false)
+        {
+            epoch.Resume();
+            var localTail = allocator.GetTailAddress();
+            if (SafeTailAddress < localTail)
+                epoch.BumpCurrentEpoch(() => UpdateTailCallback(localTail));
+            if (spinWait)
+            {
+                while (SafeTailAddress < localTail)
+                {
+                    epoch.ProtectAndDrain();
+                    Thread.Yield();
+                }
+            }
+            epoch.Suspend();
+            return localTail;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

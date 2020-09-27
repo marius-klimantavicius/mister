@@ -153,14 +153,33 @@ namespace Marius.Mister
             MisterObject,
             TValueAtomSource,
             MisterObjectEnvironment<TValue, TValueAtomSource>,
-            FasterKV<MisterObject, MisterObject, byte[], TValue, object, MisterObjectEnvironment<TValue, TValueAtomSource>>
+            FasterKV<MisterObject, MisterObject>
         >
         where TKeyAtomSource : struct, IMisterAtomSource<MisterObject>
         where TValueAtomSource : struct, IMisterAtomSource<MisterObject>
     {
+        private sealed class MisterVariableLengthStruct : IVariableLengthStruct<MisterObject, byte[]>
+        {
+            public static readonly MisterVariableLengthStruct Instance = new MisterVariableLengthStruct();
+
+            public int GetInitialLength(ref byte[] input)
+            {
+                return sizeof(int) + input.Length;
+            }
+
+            public int GetLength(ref MisterObject t, ref byte[] input)
+            {
+                return sizeof(int) + input.Length;
+            }
+        }
+
+        private readonly MisterObjectEnvironment<TValue, TValueAtomSource> _environment;
+
         public MisterConnection(DirectoryInfo directory, IMisterSerializer<TKey, MisterObject, TKeyAtomSource> keySerializer, IMisterSerializer<TValue, MisterObject, TValueAtomSource> valueSerializer, MisterConnectionSettings settings = null, string name = null)
             : base(directory, keySerializer, valueSerializer, settings, name)
         {
+            _environment = new MisterObjectEnvironment<TValue, TValueAtomSource>(_valueSerializer);
+
             Initialize();
         }
 
@@ -170,9 +189,8 @@ namespace Marius.Mister
                 _faster.Dispose();
 
             if (_mainDevice != null)
-                _mainDevice.Close();
-
-            var environment = new MisterObjectEnvironment<TValue, TValueAtomSource>(_valueSerializer);
+                _mainDevice.Dispose();
+            
             var variableLengthStructSettings = new VariableLengthStructSettings<MisterObject, MisterObject>()
             {
                 keyLength = MisterObjectVariableLengthStruct.Instance,
@@ -180,25 +198,26 @@ namespace Marius.Mister
             };
 
             _mainDevice = Devices.CreateLogDevice(Path.Combine(_directory.FullName, @"hlog.log"));
-            _faster = new FasterKV<MisterObject, MisterObject, byte[], TValue, object, MisterObjectEnvironment<TValue, TValueAtomSource>>(
+            _faster = new FasterKV<MisterObject, MisterObject>(
                 _settings.IndexSize,
-                environment,
                 _settings.GetLogSettings(_mainDevice),
                 new CheckpointSettings() { CheckpointDir = _directory.FullName, CheckPointType = CheckpointType.FoldOver },
-                serializerSettings: null,
                 comparer: MisterObjectEqualityComparer.Instance,
                 variableLengthStructSettings: variableLengthStructSettings
             );
         }
+
+        protected override ClientSession<MisterObject, MisterObject, byte[], TValue, object, MisterObjectEnvironment<TValue, TValueAtomSource>> NewSession(string sessionId)
+        {
+            return _faster.For(_environment).NewSession(_environment, sessionId, variableLengthStruct: MisterVariableLengthStruct.Instance);
+        }
     }
 
     public abstract class MisterConnection<TKey, TValue, TKeyAtom, TKeyAtomSource, TValueAtom, TValueAtomSource, TFunctions, TFaster> : IMisterConnection<TKey, TValue>
-        where TKeyAtom : new()
-        where TValueAtom : new()
         where TKeyAtomSource : struct, IMisterAtomSource<TKeyAtom>
         where TValueAtomSource : struct, IMisterAtomSource<TValueAtom>
         where TFunctions : IFunctions<TKeyAtom, TValueAtom, byte[], TValue, object>
-        where TFaster : IFasterKV<TKeyAtom, TValueAtom, byte[], TValue, object, TFunctions>
+        where TFaster : IFasterKV<TKeyAtom, TValueAtom>
     {
         private sealed class MisterSession : IMisterSession<TKey, TValue>
         {
@@ -213,7 +232,7 @@ namespace Marius.Mister
             public MisterSession(MisterConnection<TKey, TValue, TKeyAtom, TKeyAtomSource, TValueAtom, TValueAtomSource, TFunctions, TFaster> connection, string sessionId = null)
             {
                 _connection = connection;
-                _session = _connection._faster.NewSession(sessionId);
+                _session = _connection.NewSession(sessionId);
 
                 _cancellationToken = _connection._cancellationTokenSource.Token;
 
@@ -251,7 +270,7 @@ namespace Marius.Mister
                     if (waitCommit)
                         await _session.WaitForCommitAsync();
 
-                    var result = readResult.CompleteRead();
+                    var result = readResult.Complete();
                     return result.Item2;
                 }
             }
@@ -264,7 +283,9 @@ namespace Marius.Mister
                 using (var keySource = _connection._keySerializer.Serialize(key))
                 using (var valueSource = _connection._valueSerializer.Serialize(value))
                 {
-                    await _session.UpsertAsync(ref keySource.GetAtom(), ref valueSource.GetAtom(), waitForCommit: waitCommit, token: _cancellationToken);
+                    var status = _session.Upsert(ref keySource.GetAtom(), ref valueSource.GetAtom());
+                    if (status == Status.PENDING)
+                        await _session.CompletePendingAsync(waitForCommit: waitCommit, token: _cancellationToken);
                     _connection._maintenanceService.IncrementVersion();
                 }
             }
@@ -276,7 +297,9 @@ namespace Marius.Mister
 
                 using (var keySource = _connection._keySerializer.Serialize(key))
                 {
-                    await _session.DeleteAsync(ref keySource.GetAtom(), waitForCommit: waitCommit, token: _cancellationToken);
+                    var status = _session.Delete(ref keySource.GetAtom());
+                    if (status == Status.PENDING)
+                        await _session.CompletePendingAsync(waitForCommit: waitCommit, token: _cancellationToken);
                     _connection._maintenanceService.IncrementVersion();
                 }
             }
@@ -345,7 +368,7 @@ namespace Marius.Mister
                 _maintenanceService.Close();
 
                 _faster.Dispose();
-                _mainDevice.Close();
+                _mainDevice.Dispose();
                 _cancellationTokenSource.Dispose();
             }
         }
@@ -439,6 +462,8 @@ namespace Marius.Mister
         }
 
         protected abstract void Create();
+
+        protected abstract ClientSession<TKeyAtom, TValueAtom, byte[], TValue, object, TFunctions> NewSession(string sessionId);
 
         protected virtual MisterConnectionMaintenanceService<TValue, TKeyAtom, TValueAtom, TFunctions, TFaster> CreateMaintenanceService()
         {

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Threading;
 using System.Threading.Tasks;
@@ -11,28 +12,26 @@ namespace FASTER.core
     internal class IndexSnapshotTask : ISynchronizationTask
     {
         /// <inheritdoc />
-        public void GlobalBeforeEnteringState<Key, Value, Input, Output, Context, Functions>(
+        public void GlobalBeforeEnteringState<Key, Value>(
             SystemState next,
-            FasterKV<Key, Value, Input, Output, Context, Functions> faster)
-            where Key : new()
-            where Value : new()
-            where Functions : IFunctions<Key, Value, Input, Output, Context>
+            FasterKV<Key, Value> faster)
         {
             switch (next.phase)
             {
                 case Phase.PREP_INDEX_CHECKPOINT:
-                    if (faster._indexCheckpointToken == default)
+                    if (faster._indexCheckpoint.IsDefault())
                     {
                         faster._indexCheckpointToken = Guid.NewGuid();
                         faster.InitializeIndexCheckpoint(faster._indexCheckpointToken);
                     }
 
                     faster.ObtainCurrentTailAddress(ref faster._indexCheckpoint.info.startLogicalAddress);
-                    break;
-                case Phase.INDEX_CHECKPOINT:
                     if (faster.UseReadCache && faster.ReadCache.BeginAddress != faster.ReadCache.TailAddress)
                         throw new FasterException("Index checkpoint with read cache is not supported");
                     faster.TakeIndexFuzzyCheckpoint();
+                    break;
+
+                case Phase.WAIT_INDEX_CHECKPOINT:
                     break;
                     
                 case Phase.REST:
@@ -41,65 +40,53 @@ namespace FASTER.core
                     // the tail address.
                     if (faster.ObtainCurrentTailAddress(ref faster._indexCheckpoint.info.finalLogicalAddress))
                         faster._indexCheckpoint.info.num_buckets = faster.overflowBucketsAllocator.GetMaxValidAddress();
-                    if (faster._indexCheckpointToken != default)
+                    if (!faster._indexCheckpoint.IsDefault())
                     {
                         faster.WriteIndexMetaInfo();
-                        faster._indexCheckpointToken = default;
+                        faster._indexCheckpoint.Reset();
                     }
-                    faster._indexCheckpoint.Reset();
 
                     break;
             }
         }
 
         /// <inheritdoc />
-        public void GlobalAfterEnteringState<Key, Value, Input, Output, Context, Functions>(
+        public void GlobalAfterEnteringState<Key, Value>(
             SystemState next,
-            FasterKV<Key, Value, Input, Output, Context, Functions> faster)
-            where Key : new()
-            where Value : new()
-            where Functions : IFunctions<Key, Value, Input, Output, Context>
+            FasterKV<Key, Value> faster)
         {
         }
 
         /// <inheritdoc />
-        public async ValueTask OnThreadState<Key, Value, Input, Output, Context, Functions>(
+        public void OnThreadState<Key, Value, Input, Output, Context, FasterSession>(
             SystemState current,
-            SystemState prev, FasterKV<Key, Value, Input, Output, Context, Functions> faster,
-            FasterKV<Key, Value, Input, Output, Context, Functions>.FasterExecutionContext ctx,
-            ClientSession<Key, Value, Input, Output, Context, Functions> clientSession, bool async = true,
+            SystemState prev, 
+            FasterKV<Key, Value> faster,
+            FasterKV<Key, Value>.FasterExecutionContext<Input, Output, Context> ctx,
+            FasterSession fasterSession,
+            List<ValueTask> valueTasks,
             CancellationToken token = default)
-            where Key : new()
-            where Value : new()
-            where Functions : IFunctions<Key, Value, Input, Output, Context>
+            where FasterSession : IFasterSession
         {
             switch (current.phase)
             {
                 case Phase.PREP_INDEX_CHECKPOINT:
-                    if (ctx != null)
-                    {
-                        if (!ctx.markers[EpochPhaseIdx.PrepareForIndexCheckpt])
-                            ctx.markers[EpochPhaseIdx.PrepareForIndexCheckpt] = true;
-                        faster.epoch.Mark(EpochPhaseIdx.PrepareForIndexCheckpt, current.version);
-                    }
-
-                    if (faster.epoch.CheckIsComplete(EpochPhaseIdx.PrepareForIndexCheckpt, current.version))
-                        faster.GlobalStateMachineStep(current);
+                    faster.GlobalStateMachineStep(current);
                     break;
-                case Phase.INDEX_CHECKPOINT:
-                    if (ctx != null)
+                case Phase.WAIT_INDEX_CHECKPOINT:
+                    var notify = faster.IsIndexFuzzyCheckpointCompleted();
+                    notify = notify || !faster.SameCycle(current);
+
+                    if (valueTasks != null && !notify)
                     {
-                        // Resetting the marker for a potential FULL or INDEX_ONLY checkpoint in the future
-                        ctx.markers[EpochPhaseIdx.PrepareForIndexCheckpt] = false;
+                        var t = faster.IsIndexFuzzyCheckpointCompletedAsync(token);
+                        if (!faster.SameCycle(current))
+                            notify = true;
+                        else
+                            valueTasks.Add(t);
                     }
 
-                    if (async && !faster.IsIndexFuzzyCheckpointCompleted())
-                    {
-                        clientSession?.UnsafeSuspendThread();
-                        await faster.IsIndexFuzzyCheckpointCompletedAsync(token);
-                        clientSession?.UnsafeResumeThread();
-                    }
-
+                    if (!notify) return;
                     faster.GlobalStateMachineStep(current);
                     break;
             }
@@ -128,11 +115,10 @@ namespace FASTER.core
                     result.phase = Phase.PREP_INDEX_CHECKPOINT;
                     break;
                 case Phase.PREP_INDEX_CHECKPOINT:
-                    result.phase = Phase.INDEX_CHECKPOINT;
+                    result.phase = Phase.WAIT_INDEX_CHECKPOINT;
                     break;
-                case Phase.INDEX_CHECKPOINT:
+                case Phase.WAIT_INDEX_CHECKPOINT:
                     result.phase = Phase.REST;
-                    result.version++;
                     break;
                 default:
                     throw new FasterException("Invalid Enum Argument");

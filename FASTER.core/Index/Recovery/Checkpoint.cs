@@ -24,18 +24,14 @@ namespace FASTER.core
     
     internal static class EpochPhaseIdx
     {
-        public const int PrepareForIndexCheckpt = 0;
-        public const int Prepare = 1;
-        public const int InProgress = 2;
-        public const int WaitPending = 3;
-        public const int WaitFlush = 4;
-        public const int CheckpointCompletionCallback = 5;
+        public const int Prepare = 0;
+        public const int InProgress = 1;
+        public const int WaitPending = 2;
+        public const int WaitFlush = 3;
+        public const int CheckpointCompletionCallback = 4;
     }
 
-    public partial class FasterKV<Key, Value, Input, Output, Context, Functions>
-        where Key : new()
-        where Value : new()
-        where Functions : IFunctions<Key, Value, Input, Output, Context>
+    public partial class FasterKV<Key, Value>
     {
         
         internal TaskCompletionSource<LinkedCheckpointInfo> checkpointTcs
@@ -47,7 +43,7 @@ namespace FASTER.core
 
         internal Task<LinkedCheckpointInfo> CheckpointTask => checkpointTcs.Task;
 
-        internal void AcquireSharedLatchesForAllPendingRequests(FasterExecutionContext ctx)
+        internal void AcquireSharedLatchesForAllPendingRequests<Input, Output, Context>(FasterExecutionContext<Input, Output, Context> ctx)
         {
             foreach (var _ctx in ctx.retryRequests)
             {

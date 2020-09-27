@@ -1,6 +1,7 @@
 ﻿// Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT license.
 
+using System;
 using System.Diagnostics;
 using System.Threading;
 
@@ -10,12 +11,10 @@ namespace FASTER.core
     /// Scan iterator for hybrid log
     /// </summary>
     public sealed class BlittableScanIterator<Key, Value> : IFasterScanIterator<Key, Value>
-        where Key : new()
-        where Value : new()
     {
         private readonly int frameSize;
         private readonly BlittableAllocator<Key, Value> hlog;
-        private readonly long beginAddress, endAddress;
+        private readonly long endAddress;
         private readonly BlittableFrame frame;
         private readonly CountdownEvent[] loaded;
 
@@ -42,7 +41,6 @@ namespace FASTER.core
             if (beginAddress == 0)
                 beginAddress = hlog.GetFirstValidLogicalAddress(0);
 
-            this.beginAddress = beginAddress;
             this.endAddress = endAddress;
             currentAddress = -1;
             nextAddress = beginAddress;
@@ -98,9 +96,10 @@ namespace FASTER.core
         {
             recordInfo = default;
 
-            currentAddress = nextAddress;
             while (true)
             {
+                currentAddress = nextAddress;
+
                 // Check for boundary conditions
                 if (currentAddress >= endAddress)
                 {
@@ -123,7 +122,7 @@ namespace FASTER.core
                 if (currentAddress < hlog.HeadAddress)
                     BufferAndLoad(currentAddress, currentPage, currentPage % frameSize);
 
-                var physicalAddress = default(long);
+                long physicalAddress;
                 if (currentAddress >= hlog.HeadAddress)
                     physicalAddress = hlog.GetPhysicalAddress(currentAddress);
                 else
@@ -133,20 +132,20 @@ namespace FASTER.core
                 var recordSize = hlog.GetRecordSize(physicalAddress);
                 if ((currentAddress & hlog.PageSizeMask) + recordSize > hlog.PageSize)
                 {
-                    currentAddress = (1 + (currentAddress >> hlog.LogPageSizeBits)) << hlog.LogPageSizeBits;
+                    nextAddress = (1 + (currentAddress >> hlog.LogPageSizeBits)) << hlog.LogPageSizeBits;
                     continue;
                 }
+
+                nextAddress = currentAddress + recordSize;
 
                 ref var info = ref hlog.GetInfo(physicalAddress);
                 if (info.Invalid || info.IsNull())
                 {
-                    currentAddress += recordSize;
                     continue;
                 }
 
                 currentPhysicalAddress = physicalAddress;
                 recordInfo = info;
-                nextAddress = currentAddress + recordSize;
                 return true;
             }
         }
@@ -207,14 +206,14 @@ namespace FASTER.core
             loaded[currentFrame].Wait();
         }
 
-        private unsafe void AsyncReadPagesCallback(uint errorCode, uint numBytes, NativeOverlapped* overlap)
+        private unsafe void AsyncReadPagesCallback(uint errorCode, uint numBytes, object context)
         {
             if (errorCode != 0)
             {
-                Trace.TraceError("OverlappedStream GetQueuedCompletionStatus error: {0}", errorCode);
+                Trace.TraceError("AsyncReadPagesCallback error: {0}", errorCode);
             }
 
-            var result = (PageAsyncReadResult<Empty>)Overlapped.Unpack(overlap).AsyncResult;
+            var result = (PageAsyncReadResult<Empty>)context;
 
             if (result.freeBuffer1 != null)
             {
@@ -229,7 +228,6 @@ namespace FASTER.core
             }
 
             Interlocked.MemoryBarrier();
-            Overlapped.Free(overlap);
         }
     }
 }
