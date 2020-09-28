@@ -164,12 +164,12 @@ namespace Marius.Mister
 
             public int GetInitialLength(ref byte[] input)
             {
-                return sizeof(int) + input.Length;
+                return 2 * sizeof(int);
             }
 
             public int GetLength(ref MisterObject t, ref byte[] input)
             {
-                return sizeof(int) + input.Length;
+                return sizeof(int) + t.Length;
             }
         }
 
