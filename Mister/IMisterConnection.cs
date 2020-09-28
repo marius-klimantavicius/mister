@@ -11,7 +11,7 @@ namespace Marius.Mister
         void Checkpoint();
         Task CheckpointAsync();
 
-        void Flush(bool waitPending = false);
+        void Flush(bool waitPending = false, bool evict = false);
         
         ValueTask<TValue> GetAsync(TKey key, bool waitPending = true);
         ValueTask SetAsync(TKey key, TValue value, bool waitPending = true);

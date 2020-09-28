@@ -96,7 +96,7 @@ namespace Marius.Mister
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void Flush(bool waitPending)
+        public void Flush(bool waitPending, bool evict = false)
         {
             _underlyingConnection.Flush(waitPending);
         }

@@ -71,7 +71,10 @@ namespace Marius.Mister
                 {
                     using (new DurationLogger(sw))
                     {
-                        connection.Flush(true);
+                        if (parts.Length > 1 && parts[1] == "evict")
+                            connection.Flush(true, true);
+                        else
+                            connection.Flush(true);
                     }
                 }
                 else if (parts[0] == "del" && parts.Length > 1)
